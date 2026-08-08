@@ -846,33 +846,72 @@ export default function Home() {
 
   if (!currentUser) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-slate-50 p-6">
-        <div className="w-full max-w-md rounded-2xl bg-white p-8 shadow-xl">
-          <p className="text-sm font-semibold uppercase tracking-wide text-indigo-600">Task Management</p>
-          <h1 className="mt-2 text-3xl font-bold">Sign in to your workspace</h1>
-          <p className="mt-2 text-sm text-slate-500">Use a demo account to try each role.</p>
-          <form onSubmit={login} className="mt-6 space-y-4">
-            <input
-              value={loginEmail}
-              onChange={(event) => setLoginEmail(event.target.value)}
-              type="email"
-              placeholder="Email"
-              className="w-full rounded-lg border px-4 py-3 outline-none focus:border-indigo-500"
-            />
-            <input
-              value={loginPassword}
-              onChange={(event) => setLoginPassword(event.target.value)}
-              type="password"
-              placeholder="Password"
-              className="w-full rounded-lg border px-4 py-3 outline-none focus:border-indigo-500"
-            />
-            {loginError && <p className="text-sm text-red-600">{loginError}</p>}
-            <button className="w-full rounded-lg bg-indigo-600 px-4 py-3 font-semibold text-white hover:bg-indigo-700">Sign in</button>
-          </form>
-          <div className="mt-6 space-y-2 rounded-xl bg-slate-50 p-4 text-xs text-slate-600">
-            <p><b>Admin:</b> admin@task.local / admin123</p>
-            <p><b>Manager:</b> manager@task.local / manager123</p>
-            <p><b>Employee:</b> employee@task.local / employee123</p>
+      <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-slate-950 p-4 sm:p-8">
+        <div className="pointer-events-none absolute -right-24 -top-24 h-96 w-96 rounded-full bg-indigo-500/20 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-32 -left-24 h-96 w-96 rounded-full bg-cyan-400/10 blur-3xl" />
+        <div className="relative grid w-full max-w-5xl overflow-hidden rounded-3xl border border-white/10 bg-white shadow-2xl shadow-indigo-950/30 lg:grid-cols-[0.9fr_1.1fr]">
+          <div className="hidden flex-col justify-between bg-gradient-to-br from-indigo-600 via-indigo-700 to-slate-950 p-10 text-white lg:flex">
+            <div>
+              <div className="flex items-center gap-3">
+                <img src="/mellivo-logo.png" alt="Mellivo logo" className="h-12 w-12 rounded-2xl bg-white object-contain p-1 shadow-lg" />
+                <div>
+                  <p className="text-lg font-bold tracking-[0.22em]">MELLIVO</p>
+                  <p className="text-xs font-medium uppercase tracking-[0.18em] text-indigo-200">Task Management</p>
+                </div>
+              </div>
+              <div className="mt-20 max-w-sm">
+                <p className="text-sm font-semibold uppercase tracking-[0.18em] text-indigo-200">Mellivo workspace</p>
+                <h2 className="mt-4 text-4xl font-bold leading-tight">Move every project forward with clarity.</h2>
+                <p className="mt-5 text-sm leading-6 text-indigo-100">A focused workspace for projects, tasks, team updates, and measurable progress.</p>
+              </div>
+            </div>
+            <p className="text-xs text-indigo-200">Secure workspace access · Mellivo</p>
+          </div>
+          <div className="p-7 sm:p-10">
+            <div className="flex items-center gap-3 lg:hidden">
+              <img src="/mellivo-logo.png" alt="Mellivo logo" className="h-11 w-11 rounded-xl border border-slate-200 bg-white object-contain p-1 shadow-sm" />
+              <div>
+                <p className="font-bold tracking-[0.18em] text-slate-900">MELLIVO</p>
+                <p className="text-xs font-medium uppercase tracking-wider text-indigo-600">Task Management</p>
+              </div>
+            </div>
+            <div className="mt-8 lg:mt-0">
+              <p className="text-sm font-semibold uppercase tracking-[0.16em] text-indigo-600">Welcome back</p>
+              <h1 className="mt-3 text-3xl font-bold tracking-tight text-slate-950">Sign in to your workspace</h1>
+              <p className="mt-3 text-sm leading-6 text-slate-500">Use your Mellivo credentials to continue managing projects and progress.</p>
+            </div>
+            <form onSubmit={login} className="mt-8 space-y-5">
+              <label className="block text-sm font-semibold text-slate-700">
+                Work email
+                <input
+                  value={loginEmail}
+                  onChange={(event) => setLoginEmail(event.target.value)}
+                  type="email"
+                  placeholder="you@company.com"
+                  className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3.5 text-slate-900 outline-none placeholder:text-slate-400 focus:border-indigo-500 focus:bg-white focus:ring-4 focus:ring-indigo-100"
+                />
+              </label>
+              <label className="block text-sm font-semibold text-slate-700">
+                Password
+                <input
+                  value={loginPassword}
+                  onChange={(event) => setLoginPassword(event.target.value)}
+                  type="password"
+                  placeholder="Enter your password"
+                  className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3.5 text-slate-900 outline-none placeholder:text-slate-400 focus:border-indigo-500 focus:bg-white focus:ring-4 focus:ring-indigo-100"
+                />
+              </label>
+              {loginError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{loginError}</p>}
+              <button className="w-full rounded-xl bg-indigo-600 px-4 py-3.5 font-semibold text-white shadow-lg shadow-indigo-200 hover:bg-indigo-700">Sign in to Mellivo</button>
+            </form>
+            <div className="mt-8 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Demo access</p>
+              <div className="mt-3 grid gap-2 text-xs text-slate-600 sm:grid-cols-3">
+                <p><b className="text-slate-900">Admin</b><br />admin@task.local<br />admin123</p>
+                <p><b className="text-slate-900">Manager</b><br />manager@task.local<br />manager123</p>
+                <p><b className="text-slate-900">Employee</b><br />employee@task.local<br />employee123</p>
+              </div>
+            </div>
           </div>
         </div>
       </main>
@@ -910,48 +949,60 @@ export default function Home() {
   const reportPeriodLabel = reportPeriod === "Daily" ? "today" : reportPeriod === "Weekly" ? "this week" : "this month";
 
   return (
-    <main className="min-h-screen bg-slate-50 text-slate-900">
+    <main className="min-h-screen bg-[#f4f7fb] text-slate-900">
         <div className="flex min-h-screen flex-col xl:flex-row">
-        <aside className="hidden w-72 shrink-0 border-r bg-white p-6 xl:block">
-          <h1 className="text-2xl font-bold text-indigo-600">Task Management</h1>
-          <div className="mt-8 rounded-xl bg-indigo-50 p-4">
+        <aside className="sticky top-0 hidden h-screen w-72 shrink-0 border-r border-slate-200/80 bg-white/90 p-6 backdrop-blur xl:block">
+          <div className="flex items-center gap-3">
+            <img src="/mellivo-logo.png" alt="Mellivo logo" className="h-11 w-11 rounded-2xl border border-slate-200 bg-white object-contain p-1 shadow-sm" />
+            <div>
+              <p className="font-bold tracking-[0.18em] text-slate-950">MELLIVO</p>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-indigo-600">Task Management</p>
+            </div>
+          </div>
+          <div className="mt-9 rounded-2xl border border-indigo-100 bg-gradient-to-br from-indigo-50 to-white p-4 shadow-sm">
             <p className="font-semibold">{currentUser.name}</p>
             <p className="mt-1 text-sm text-indigo-700">{currentUser.role}</p>
           </div>
-          <nav className="mt-8 space-y-2">
+          <nav className="mt-8 space-y-1.5">
             {[
               "Dashboard",
               currentUser.role === "Admin" ? "User management" : currentUser.role === "Manager" ? "Team tasks" : "My daily updates",
               "Projects",
               ...(currentUser.role === "Employee" ? [] : ["Reports"]),
             ].map((item) => (
-              <a key={item} href={`#${sectionTarget(item)}`} onClick={(event) => { event.preventDefault(); navigateTo(item); }} className="block w-full rounded-lg px-4 py-3 text-left text-sm font-medium hover:bg-indigo-50 hover:text-indigo-600">{item}</a>
+              <a key={item} href={`#${sectionTarget(item)}`} onClick={(event) => { event.preventDefault(); navigateTo(item); }} className="block w-full rounded-xl px-4 py-3 text-left text-sm font-medium text-slate-600 hover:bg-indigo-50 hover:text-indigo-700">{item}</a>
             ))}
           </nav>
           <button
             onClick={() => setCurrentUserId(null)}
-            className="mt-8 w-full rounded-lg border px-4 py-3 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+            className="mt-8 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-600 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"
           >
             Sign out
           </button>
         </aside>
 
-        <div className="border-b bg-white p-4 xl:hidden">
+        <div className="border-b border-slate-200/80 bg-white/95 p-4 shadow-sm backdrop-blur xl:hidden">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <h1 className="text-xl font-bold text-indigo-600">Task Management</h1>
+              <div className="flex items-center gap-2.5">
+                <img src="/mellivo-logo.png" alt="Mellivo logo" className="h-9 w-9 rounded-xl border border-slate-200 bg-white object-contain p-1 shadow-sm" />
+                <div>
+                  <h1 className="text-sm font-bold tracking-[0.16em] text-slate-950">MELLIVO</h1>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-indigo-600">Task Management</p>
+                </div>
+              </div>
               <p className="mt-1 text-sm text-slate-500">{currentUser.name} · {currentUser.role}</p>
             </div>
             <button
               onClick={() => setCurrentUserId(null)}
-              className="rounded-lg border px-3 py-2 text-sm font-semibold text-slate-600"
+              className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 hover:border-indigo-200 hover:text-indigo-700"
             >
               Sign out
             </button>
           </div>
           <nav className="mt-4 flex flex-wrap gap-2">
             {["Dashboard", currentUser.role === "Admin" ? "User management" : currentUser.role === "Manager" ? "Team tasks" : "My daily updates", "Projects", ...(currentUser.role === "Employee" ? [] : ["Reports"])].map((item) => (
-              <a key={item} href={`#${sectionTarget(item)}`} onClick={(event) => { event.preventDefault(); navigateTo(item); }} className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-medium text-slate-700">
+              <a key={item} href={`#${sectionTarget(item)}`} onClick={(event) => { event.preventDefault(); navigateTo(item); }} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700">
                 {item}
               </a>
             ))}
