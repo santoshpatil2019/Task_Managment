@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 
 type Role = "Admin" | "Manager" | "Employee";
@@ -167,6 +167,7 @@ export default function Home() {
   const [newTaskParentId, setNewTaskParentId] = useState("");
 
   const [noteTaskId, setNoteTaskId] = useState<string | null>(null);
+  const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null);
   const [noteText, setNoteText] = useState("");
   const [employeeEdits, setEmployeeEdits] = useState<
     Record<string, { description: string; status: TaskStatus; progress: number }>
@@ -277,6 +278,11 @@ export default function Home() {
   const toggleMessages = (taskId: string) => {
     if (noteTaskId !== taskId) markMessagesRead(taskId);
     setNoteTaskId(noteTaskId === taskId ? null : taskId);
+  };
+
+  const showMessageDetails = (note: Note) => {
+    setSelectedMessageId(note.id);
+    markMessagesRead(note.taskId);
   };
 
   const sortTasksAscending = (items: Task[]) =>
@@ -687,7 +693,8 @@ export default function Home() {
                   </thead>
                   <tbody>
                     {taskNotes.map((note) => (
-                      <tr key={note.id} className={`border-t border-amber-100 align-top text-amber-900 ${isNewMessage(note) ? "animate-pulse bg-yellow-200 font-semibold shadow-[inset_0_0_0_2px_rgb(245_158_11)]" : ""}`}>
+                      <Fragment key={note.id}>
+                      <tr onClick={() => showMessageDetails(note)} className={`cursor-pointer border-t border-amber-100 align-top text-amber-900 hover:bg-amber-50 ${isNewMessage(note) ? "animate-pulse bg-yellow-200 font-semibold shadow-[inset_0_0_0_2px_rgb(245_158_11)]" : ""}`}>
                         <td className="break-words px-3 py-2">
                           {isNewMessage(note) && <span className="mr-2 rounded-full bg-orange-500 px-2 py-0.5 text-[10px] font-bold uppercase text-white">NEW</span>}
                           {note.text}
@@ -695,6 +702,19 @@ export default function Home() {
                         <td className="break-words px-3 py-2">{getUserName(note.authorId)}</td>
                         <td className="break-words px-3 py-2 text-amber-700">{formatTimestamp(note.createdAt)}</td>
                       </tr>
+                      {selectedMessageId === note.id && (
+                        <tr key={`${note.id}-details`}>
+                          <td colSpan={3} className="px-3 py-3">
+                            <div className="relative rounded-2xl border border-indigo-200 bg-indigo-50 p-4 text-indigo-950 shadow-sm">
+                              <span className="absolute -top-2 left-6 h-4 w-4 rotate-45 border-l border-t border-indigo-200 bg-indigo-50" />
+                              <p className="relative text-xs font-bold uppercase tracking-wide text-indigo-600">Message details</p>
+                              <p className="relative mt-2 whitespace-pre-wrap text-sm">{note.text}</p>
+                              <p className="relative mt-3 text-xs text-indigo-700">Sent by {getUserName(note.authorId)} · {formatTimestamp(note.createdAt)} · {getProjectName(task.projectId)} · {task.title}</p>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                      </Fragment>
                     ))}
                   </tbody>
                 </table>
