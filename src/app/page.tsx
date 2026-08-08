@@ -229,6 +229,20 @@ export default function Home() {
   const getProjectName = (id: string) =>
     projects.find((project) => project.id === id)?.name ?? "Unknown project";
 
+  const navigateTo = (item: string) => {
+    const targets: Record<string, string> = {
+      Dashboard: "dashboard",
+      "User management": "user-management",
+      "Team tasks": "tasks",
+      "My daily updates": "tasks",
+      Projects: "projects",
+    };
+    document.getElementById(targets[item] ?? "dashboard")?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  };
+
   const login = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const user = users.find(
@@ -567,7 +581,7 @@ export default function Home() {
               currentUser.role === "Admin" ? "User management" : currentUser.role === "Manager" ? "Team tasks" : "My daily updates",
               "Projects",
             ].map((item) => (
-              <button key={item} className="w-full rounded-lg px-4 py-3 text-left text-sm font-medium hover:bg-indigo-50 hover:text-indigo-600">{item}</button>
+              <button key={item} onClick={() => navigateTo(item)} className="w-full rounded-lg px-4 py-3 text-left text-sm font-medium hover:bg-indigo-50 hover:text-indigo-600">{item}</button>
             ))}
           </nav>
           <button
@@ -593,7 +607,7 @@ export default function Home() {
           </div>
           <nav className="mt-4 flex flex-wrap gap-2">
             {["Dashboard", currentUser.role === "Admin" ? "User management" : currentUser.role === "Manager" ? "Team tasks" : "My daily updates", "Projects"].map((item) => (
-              <button key={item} className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-medium text-slate-700">
+              <button key={item} onClick={() => navigateTo(item)} className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-medium text-slate-700">
                 {item}
               </button>
             ))}
@@ -601,7 +615,7 @@ export default function Home() {
         </div>
 
         <section className="min-w-0 flex-1 overflow-x-hidden p-4 sm:p-6 md:p-10">
-          <div className="mx-auto w-full max-w-7xl">
+          <div id="dashboard" className="mx-auto w-full max-w-7xl">
             <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
               <div>
                 <p className="text-sm text-slate-500">Monday, August 9</p>
@@ -633,19 +647,19 @@ export default function Home() {
             </div>
 
             {currentUser.role === "Admin" && (
-              <div className="mt-8 rounded-xl bg-white p-6 shadow-sm">
+              <div id="user-management" className="mt-8 rounded-xl bg-white p-6 shadow-sm">
                 <div className="flex items-center justify-between"><div><h3 className="text-xl font-bold">User management</h3><p className="mt-1 text-sm text-slate-500">Create users and manage access roles.</p></div><button onClick={() => setModal("user")} className="rounded-lg bg-slate-100 px-4 py-2 text-sm font-semibold text-indigo-600">+ Add user</button></div>
                 <div className="mt-5 hidden overflow-x-auto xl:block"><table className="w-full text-left text-sm"><thead className="border-b text-xs uppercase text-slate-400"><tr><th className="pb-3">User</th><th className="pb-3">Email</th><th className="pb-3">Role</th><th className="pb-3">Status</th><th className="pb-3">Action</th></tr></thead><tbody>{users.map((user) => <tr key={user.id} className="border-b last:border-0"><td className="py-4 font-semibold">{user.name}</td><td className="py-4 text-slate-500">{user.email}</td><td className="py-4"><select value={user.role} onChange={(event) => updateUserRole(user.id, event.target.value as Role)} className="rounded-lg border px-3 py-2"><option>Admin</option><option>Manager</option><option>Employee</option></select></td><td className="py-4"><span className={`rounded-full px-2 py-1 text-xs ${user.active ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"}`}>{user.active ? "Active" : "Inactive"}</span></td><td className="py-4"><button onClick={() => toggleUser(user.id)} className="text-sm font-semibold text-indigo-600">{user.active ? "Deactivate" : "Activate"}</button></td></tr>)}</tbody></table></div>
                 <div className="mt-5 space-y-3 xl:hidden">{users.map((user) => <div key={user.id} className="rounded-xl border border-slate-200 p-4"><div className="flex items-start justify-between gap-3"><div><p className="font-semibold">{user.name}</p><p className="mt-1 break-all text-sm text-slate-500">{user.email}</p></div><span className={`rounded-full px-2 py-1 text-xs ${user.active ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"}`}>{user.active ? "Active" : "Inactive"}</span></div><div className="mt-4 grid grid-cols-2 gap-3"><label className="text-xs font-medium text-slate-500">Role<select value={user.role} onChange={(event) => updateUserRole(user.id, event.target.value as Role)} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm text-slate-700"><option>Admin</option><option>Manager</option><option>Employee</option></select></label><button onClick={() => toggleUser(user.id)} className="self-end rounded-lg bg-slate-100 px-3 py-2 text-sm font-semibold text-indigo-600">{user.active ? "Deactivate" : "Activate"}</button></div></div>)}</div>
               </div>
             )}
 
-            <div className="mt-8 rounded-xl bg-white p-6 shadow-sm">
+            <div id="projects" className="mt-8 rounded-xl bg-white p-6 shadow-sm">
               <div className="flex items-center justify-between"><div><h3 className="text-xl font-bold">Projects</h3><p className="mt-1 text-sm text-slate-500">{currentUser.role === "Admin" ? "Admin controls project creation." : "Projects connected to your tasks."}</p></div>{currentUser.role === "Admin" && <button onClick={() => setModal("project")} className="rounded-lg bg-slate-100 px-4 py-2 text-sm font-semibold text-indigo-600">+ Add project</button>}</div>
               <div className="mt-5 grid gap-4 sm:grid-cols-2 2xl:grid-cols-3">{projects.map((project) => <div key={project.id} className="rounded-lg border border-slate-200 p-4"><p className="break-words font-semibold">{project.name}</p><p className="mt-2 text-sm text-slate-500">{project.description}</p><p className="mt-3 text-xs text-indigo-600">{tasks.filter((task) => task.projectId === project.id).length} tasks</p></div>)}</div>
             </div>
 
-            <div className="mt-8 rounded-xl bg-slate-100 p-6">
+            <div id="tasks" className="mt-8 rounded-xl bg-slate-100 p-6">
               <div className="flex items-center justify-between"><div><h3 className="text-xl font-bold">{currentUser.role === "Employee" ? "My daily updates" : "Team task board"}</h3><p className="mt-1 text-sm text-slate-500">{currentUser.role === "Manager" ? "Create tasks, subtasks, notes, and assignments for employees." : currentUser.role === "Employee" ? "Update your daily description, status, and completion percentage." : "View all work across the workspace."}</p></div>{currentUser.role === "Manager" && <button onClick={() => setModal("task")} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white">+ New task</button>}</div>
               <div className="mt-5 space-y-3">{rootTasks.length ? rootTasks.map((task) => renderTask(task)) : <p className="rounded-lg bg-white p-6 text-center text-slate-500">No tasks available.</p>}</div>
             </div>
