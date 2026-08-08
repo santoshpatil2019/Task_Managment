@@ -46,6 +46,16 @@ type Note = {
   readBy?: string[];
 };
 
+type ProgressLog = {
+  id: string;
+  taskId: string;
+  employeeId: string;
+  description: string;
+  status: TaskStatus;
+  progress: number;
+  createdAt: string;
+};
+
 const STORAGE_KEY = "task-management-role-data-v1";
 const SESSION_KEY = "task-management-current-user";
 
@@ -131,6 +141,45 @@ const demoTasks: Task[] = [
   },
 ];
 
+const demoProgressLogs: ProgressLog[] = [
+  {
+    id: "progress-kickoff-1",
+    taskId: "task-kickoff",
+    employeeId: "user-employee",
+    description: "Kickoff agenda drafted and milestones reviewed.",
+    status: "In progress",
+    progress: 20,
+    createdAt: "2026-08-07T09:00:00.000Z",
+  },
+  {
+    id: "progress-kickoff-2",
+    taskId: "task-kickoff",
+    employeeId: "user-employee",
+    description: "Prepare the agenda, milestones, and kickoff notes.",
+    status: "In progress",
+    progress: 40,
+    createdAt: "2026-08-09T09:00:00.000Z",
+  },
+  {
+    id: "progress-requirements-1",
+    taskId: "task-requirements",
+    employeeId: "user-employee",
+    description: "Acceptance criteria review is scheduled.",
+    status: "Not started",
+    progress: 0,
+    createdAt: "2026-08-09T08:30:00.000Z",
+  },
+  {
+    id: "progress-docs-1",
+    taskId: "task-docs",
+    employeeId: "user-employee",
+    description: "Documentation refresh completed.",
+    status: "Complete",
+    progress: 100,
+    createdAt: "2026-08-08T16:30:00.000Z",
+  },
+];
+
 const makeId = (prefix: string) =>
   `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -139,6 +188,7 @@ export default function Home() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
+  const [progressLogs, setProgressLogs] = useState<ProgressLog[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
   const [modal, setModal] = useState<Modal>(null);
@@ -169,6 +219,7 @@ export default function Home() {
   const [noteTaskId, setNoteTaskId] = useState<string | null>(null);
   const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null);
   const [noteText, setNoteText] = useState("");
+  const [reportPeriod, setReportPeriod] = useState<"Daily" | "Weekly" | "Monthly">("Daily");
   const [employeeEdits, setEmployeeEdits] = useState<
     Record<string, { description: string; status: TaskStatus; progress: number }>
   >({});
@@ -184,17 +235,20 @@ export default function Home() {
         setProjects(data.projects ?? demoProjects);
         setTasks(data.tasks ?? demoTasks);
         setNotes(data.notes ?? []);
+        setProgressLogs(data.progressLogs ?? demoProgressLogs);
       } catch {
         setUsers(demoUsers);
         setProjects(demoProjects);
         setTasks(demoTasks);
         setNotes([]);
+        setProgressLogs(demoProgressLogs);
       }
     } else {
       setUsers(demoUsers);
       setProjects(demoProjects);
       setTasks(demoTasks);
       setNotes([]);
+      setProgressLogs(demoProgressLogs);
     }
 
     setCurrentUserId(session);
@@ -206,7 +260,7 @@ export default function Home() {
 
     window.localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ users, projects, tasks, notes }),
+      JSON.stringify({ users, projects, tasks, notes, progressLogs }),
     );
 
     if (currentUserId) {
@@ -214,7 +268,7 @@ export default function Home() {
     } else {
       window.localStorage.removeItem(SESSION_KEY);
     }
-  }, [currentUserId, hydrated, notes, projects, tasks, users]);
+  }, [currentUserId, hydrated, notes, progressLogs, projects, tasks, users]);
 
   const currentUser = users.find((user) => user.id === currentUserId) ?? null;
   const employees = users.filter((user) => user.role === "Employee" && user.active);
@@ -308,6 +362,7 @@ export default function Home() {
       "Team tasks": "tasks",
       "My daily updates": "tasks",
       Projects: "projects",
+      Reports: "reports",
     };
     return targets[item] ?? "dashboard";
   };
@@ -478,7 +533,9 @@ export default function Home() {
   };
 
   const saveEmployeeUpdate = (task: Task) => {
+    if (!currentUser || currentUser.role !== "Employee") return;
     const edit = getEmployeeEdit(task);
+    const createdAt = new Date().toISOString();
     setTasks((current) =>
       current.map((item) =>
         item.id === task.id
@@ -486,6 +543,18 @@ export default function Home() {
           : item,
       ),
     );
+    setProgressLogs((current) => [
+      {
+        id: makeId("progress"),
+        taskId: task.id,
+        employeeId: currentUser.id,
+        description: edit.description,
+        status: edit.status,
+        progress: Math.min(100, Math.max(0, edit.progress)),
+        createdAt,
+      },
+      ...current,
+    ]);
     setNotice("Daily task update saved.");
   };
 
@@ -811,6 +880,34 @@ export default function Home() {
   }
 
   const rootTasks = visibleTasks.filter((task) => !task.parentId);
+  const reportStart = useMemo(() => {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    if (reportPeriod === "Monthly") {
+      start.setDate(1);
+    } else if (reportPeriod === "Weekly") {
+      const daysSinceMonday = start.getDay() === 0 ? 6 : start.getDay() - 1;
+      start.setDate(start.getDate() - daysSinceMonday);
+    }
+    return start;
+  }, [reportPeriod]);
+  const reportTaskIds = new Set(visibleTasks.map((task) => task.id));
+  const reportLogs = progressLogs
+    .filter((log) => reportTaskIds.has(log.taskId))
+    .filter((log) => currentUser.role !== "Employee" || log.employeeId === currentUser.id)
+    .filter((log) => new Date(log.createdAt) >= reportStart)
+    .sort((first, second) => second.createdAt.localeCompare(first.createdAt));
+  const latestReportByTask = Array.from(
+    reportLogs.reduce((latest, log) => {
+      if (!latest.has(log.taskId)) latest.set(log.taskId, log);
+      return latest;
+    }, new Map<string, ProgressLog>()).values(),
+  );
+  const reportAverageProgress = latestReportByTask.length
+    ? Math.round(latestReportByTask.reduce((sum, log) => sum + log.progress, 0) / latestReportByTask.length)
+    : 0;
+  const reportCompletedCount = latestReportByTask.filter((log) => log.status === "Complete").length;
+  const reportPeriodLabel = reportPeriod === "Daily" ? "today" : reportPeriod === "Weekly" ? "this week" : "this month";
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900">
@@ -826,6 +923,7 @@ export default function Home() {
               "Dashboard",
               currentUser.role === "Admin" ? "User management" : currentUser.role === "Manager" ? "Team tasks" : "My daily updates",
               "Projects",
+              "Reports",
             ].map((item) => (
               <a key={item} href={`#${sectionTarget(item)}`} onClick={(event) => { event.preventDefault(); navigateTo(item); }} className="block w-full rounded-lg px-4 py-3 text-left text-sm font-medium hover:bg-indigo-50 hover:text-indigo-600">{item}</a>
             ))}
@@ -852,7 +950,7 @@ export default function Home() {
             </button>
           </div>
           <nav className="mt-4 flex flex-wrap gap-2">
-            {["Dashboard", currentUser.role === "Admin" ? "User management" : currentUser.role === "Manager" ? "Team tasks" : "My daily updates", "Projects"].map((item) => (
+            {["Dashboard", currentUser.role === "Admin" ? "User management" : currentUser.role === "Manager" ? "Team tasks" : "My daily updates", "Projects", "Reports"].map((item) => (
               <a key={item} href={`#${sectionTarget(item)}`} onClick={(event) => { event.preventDefault(); navigateTo(item); }} className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-medium text-slate-700">
                 {item}
               </a>
@@ -948,6 +1046,93 @@ export default function Home() {
                     <tbody><tr><td colSpan={9} className="px-3 py-6 text-center text-slate-500">No projects available.</td></tr></tbody>
                   )}
                 </table>
+              </div>
+            </div>
+
+            <div id="reports" className="mt-8 rounded-xl bg-white p-6 shadow-sm">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <h3 className="text-xl font-bold">Reports</h3>
+                  <p className="mt-1 text-sm text-slate-500">Review daily, weekly, and monthly progress reports and update logs.</p>
+                </div>
+                <div className="flex flex-wrap gap-2 rounded-lg bg-slate-100 p-1" role="tablist" aria-label="Report period">
+                  {(["Daily", "Weekly", "Monthly"] as const).map((period) => (
+                    <button
+                      key={period}
+                      type="button"
+                      role="tab"
+                      aria-selected={reportPeriod === period}
+                      onClick={() => setReportPeriod(period)}
+                      className={reportPeriod === period ? "rounded-md bg-white px-4 py-2 text-sm font-semibold text-indigo-700 shadow-sm" : "rounded-md px-4 py-2 text-sm font-semibold text-slate-500 hover:text-slate-800"}
+                    >
+                      {period}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="rounded-xl border border-indigo-100 bg-indigo-50 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-indigo-600">{reportPeriod} updates</p>
+                  <p className="mt-2 text-2xl font-bold text-indigo-950">{reportLogs.length}</p>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Tasks updated</p>
+                  <p className="mt-2 text-2xl font-bold text-slate-900">{latestReportByTask.length}</p>
+                </div>
+                <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Average progress</p>
+                  <p className="mt-2 text-2xl font-bold text-emerald-950">{reportAverageProgress}%</p>
+                </div>
+                <div className="rounded-xl border border-amber-100 bg-amber-50 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">Completed tasks</p>
+                  <p className="mt-2 text-2xl font-bold text-amber-950">{reportCompletedCount}</p>
+                </div>
+              </div>
+
+              <div className="mt-6">
+                <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+                  <div>
+                    <h4 className="text-lg font-bold">{reportPeriod} progress log</h4>
+                    <p className="mt-1 text-sm text-slate-500">Timestamped employee progress updates for {reportPeriodLabel}.</p>
+                  </div>
+                  <span className="text-xs font-medium text-slate-400">Newest updates first</span>
+                </div>
+                <div className="mt-4 overflow-hidden rounded-xl border border-slate-200">
+                  {reportLogs.length ? (
+                    <table className="w-full table-fixed text-left text-sm">
+                      <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                        <tr>
+                          <th className="w-[14%] px-3 py-3">Time</th>
+                          <th className="w-[16%] px-3 py-3">Project</th>
+                          <th className="w-[18%] px-3 py-3">Task</th>
+                          <th className="w-[13%] px-3 py-3">Employee</th>
+                          <th className="w-[12%] px-3 py-3">Status</th>
+                          <th className="w-[10%] px-3 py-3">Progress</th>
+                          <th className="w-[17%] px-3 py-3">Update</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {reportLogs.map((log) => {
+                          const task = tasks.find((item) => item.id === log.taskId);
+                          return (
+                            <tr key={log.id} className="border-t border-slate-200 align-top hover:bg-slate-50">
+                              <td className="break-words px-3 py-3 text-xs text-slate-500">{formatTimestamp(log.createdAt)}</td>
+                              <td className="break-words px-3 py-3 text-xs text-slate-600">{task ? getProjectName(task.projectId) : "Unknown project"}</td>
+                              <td className="break-words px-3 py-3 font-semibold text-slate-800">{task?.title ?? "Unknown task"}</td>
+                              <td className="break-words px-3 py-3 text-xs font-semibold text-slate-700">{getUserName(log.employeeId)}</td>
+                              <td className="break-words px-3 py-3"><span className="rounded-full bg-indigo-50 px-2 py-1 text-xs text-indigo-700">{log.status}</span></td>
+                              <td className="px-3 py-3 text-xs font-bold text-indigo-700">{log.progress}%</td>
+                              <td className="break-words px-3 py-3 text-xs text-slate-600">{log.description}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <p className="p-6 text-center text-sm text-slate-500">No progress updates recorded for {reportPeriodLabel}.</p>
+                  )}
+                </div>
               </div>
             </div>
 
