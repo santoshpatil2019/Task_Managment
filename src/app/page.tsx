@@ -215,9 +215,28 @@ export default function Home() {
 
   const currentUser = users.find((user) => user.id === currentUserId) ?? null;
   const employees = users.filter((user) => user.role === "Employee" && user.active);
-  const visibleTasks = currentUser?.role === "Employee"
-    ? tasks.filter((task) => task.assigneeId === currentUser.id)
-    : tasks;
+  const visibleTasks = useMemo(() => {
+    if (!currentUser || currentUser.role !== "Employee") return tasks;
+
+    const visibleIds = new Set(
+      tasks
+        .filter((task) => task.assigneeId === currentUser.id)
+        .map((task) => task.id),
+    );
+
+    let addedParent = true;
+    while (addedParent) {
+      addedParent = false;
+      tasks.forEach((task) => {
+        if (visibleIds.has(task.id) && task.parentId && !visibleIds.has(task.parentId)) {
+          visibleIds.add(task.parentId);
+          addedParent = true;
+        }
+      });
+    }
+
+    return tasks.filter((task) => visibleIds.has(task.id));
+  }, [currentUser, tasks]);
   const completedCount = visibleTasks.filter((task) => task.status === "Complete").length;
   const pendingCount = visibleTasks.length - completedCount;
   const averageProgress = visibleTasks.length
@@ -340,6 +359,9 @@ export default function Home() {
       return;
     }
 
+    const parentTask = tasks.find((task) => task.id === newTaskParentId);
+    const parentId = parentTask?.projectId === projectId ? parentTask.id : null;
+
     setTasks((current) => [
       {
         id: makeId("task"),
@@ -352,7 +374,7 @@ export default function Home() {
         progress: 0,
         assigneeId,
         createdById: currentUser.id,
-        parentId: newTaskParentId || null,
+        parentId,
       },
       ...current,
     ]);
@@ -411,7 +433,8 @@ export default function Home() {
 
   const renderTask = (task: Task, depth = 0): React.ReactNode => {
     const children = visibleTasks.filter((child) => child.parentId === task.id);
-    const edit = currentUser?.role === "Employee" ? getEmployeeEdit(task) : null;
+    const canEditTask = currentUser?.role === "Employee" && task.assigneeId === currentUser.id;
+    const edit = canEditTask ? getEmployeeEdit(task) : null;
     const taskNotes = notes.filter((note) => note.taskId === task.id);
 
     return (
@@ -426,6 +449,9 @@ export default function Home() {
                 </span>
                 <span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-600">
                   {task.priority}
+                </span>
+                <span className="rounded-full bg-violet-50 px-2 py-1 text-xs text-violet-700">
+                  {task.parentId ? "Subtask" : "Task"}
                 </span>
               </div>
               <p className="mt-2 text-sm text-slate-500">{task.description}</p>
@@ -483,7 +509,7 @@ export default function Home() {
             </div>
           )}
 
-          {currentUser?.role === "Employee" && edit && (
+          {canEditTask && edit && (
             <div className="mt-4 grid gap-3 border-t pt-4 md:grid-cols-3">
               <textarea
                 value={edit.description}
@@ -660,12 +686,12 @@ export default function Home() {
 
             <div id="projects" className="mt-8 rounded-xl bg-white p-6 shadow-sm">
               <div className="flex items-center justify-between"><div><h3 className="text-xl font-bold">Projects</h3><p className="mt-1 text-sm text-slate-500">{currentUser.role === "Admin" ? "Admin controls project creation." : "Projects connected to your tasks."}</p></div>{currentUser.role === "Admin" && <button onClick={() => setModal("project")} className="rounded-lg bg-slate-100 px-4 py-2 text-sm font-semibold text-indigo-600">+ Add project</button>}</div>
-              <div className="mt-5 grid gap-4 sm:grid-cols-2 2xl:grid-cols-3">{projects.map((project) => <div key={project.id} className="rounded-lg border border-slate-200 p-4"><p className="break-words font-semibold">{project.name}</p><p className="mt-2 text-sm text-slate-500">{project.description}</p><p className="mt-3 text-xs text-indigo-600">{tasks.filter((task) => task.projectId === project.id).length} tasks</p></div>)}</div>
+              <div className="mt-5 grid gap-4 sm:grid-cols-2 2xl:grid-cols-3">{projects.map((project) => { const projectTasks = tasks.filter((task) => task.projectId === project.id); const subtaskCount = projectTasks.filter((task) => task.parentId).length; return <div key={project.id} className="rounded-lg border border-slate-200 p-4"><p className="break-words font-semibold">{project.name}</p><p className="mt-2 text-sm text-slate-500">{project.description}</p><p className="mt-3 text-xs text-indigo-600">{projectTasks.length} tasks · {subtaskCount} subtasks</p></div>; })}</div>
             </div>
 
             <div id="tasks" className="mt-8 rounded-xl bg-slate-100 p-6">
               <div className="flex items-center justify-between"><div><h3 className="text-xl font-bold">{currentUser.role === "Employee" ? "My daily updates" : "Team task board"}</h3><p className="mt-1 text-sm text-slate-500">{currentUser.role === "Manager" ? "Create tasks, subtasks, notes, and assignments for employees." : currentUser.role === "Employee" ? "Update your daily description, status, and completion percentage." : "View all work across the workspace."}</p></div>{currentUser.role === "Manager" && <button onClick={() => setModal("task")} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white">+ New task</button>}</div>
-              <div className="mt-5 space-y-3">{rootTasks.length ? rootTasks.map((task) => renderTask(task)) : <p className="rounded-lg bg-white p-6 text-center text-slate-500">No tasks available.</p>}</div>
+              <div className="mt-5 space-y-5">{projects.map((project) => { const projectRootTasks = rootTasks.filter((task) => task.projectId === project.id); const projectTaskCount = visibleTasks.filter((task) => task.projectId === project.id).length; return <section key={project.id} className="rounded-xl border border-slate-200 bg-white p-4"><div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between"><div><p className="text-xs font-semibold uppercase tracking-wide text-indigo-600">Project</p><h4 className="mt-1 text-lg font-bold">{project.name}</h4><p className="mt-1 text-sm text-slate-500">{project.description}</p></div><span className="text-xs font-medium text-slate-500">{projectTaskCount} tasks in hierarchy</span></div><div className="mt-4 space-y-3">{projectRootTasks.length ? projectRootTasks.map((task) => renderTask(task)) : <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">No tasks in this project yet.</p>}</div></section>; })}{projects.length === 0 && <p className="rounded-lg bg-white p-6 text-center text-slate-500">No projects available.</p>}</div>
             </div>
 
             <p className="mt-6 text-center text-xs text-slate-400">Demo mode: data is stored in this browser. Production authentication and database persistence should be added before real users are invited.</p>
