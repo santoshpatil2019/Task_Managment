@@ -951,7 +951,7 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-[#f4f7fb] text-slate-900">
         <div className="flex min-h-screen flex-col xl:flex-row">
-        <aside className="sticky top-0 hidden h-screen w-72 shrink-0 border-r border-slate-200/80 bg-white/90 p-6 backdrop-blur xl:block">
+        <aside className="sticky top-0 hidden h-screen w-64 shrink-0 border-r border-slate-200/80 bg-white/90 p-4 backdrop-blur xl:block">
           <div className="flex items-center gap-3">
             <img src="/mellivo-logo.png" alt="Mellivo logo" className="h-11 w-11 rounded-2xl border border-slate-200 bg-white object-contain p-1 shadow-sm" />
             <div>
@@ -959,23 +959,23 @@ export default function Home() {
               <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-indigo-600">Task Management</p>
             </div>
           </div>
-          <div className="mt-9 rounded-2xl border border-indigo-100 bg-gradient-to-br from-indigo-50 to-white p-4 shadow-sm">
+          <div className="mt-6 rounded-2xl border border-indigo-100 bg-gradient-to-br from-indigo-50 to-white p-3 shadow-sm">
             <p className="font-semibold">{currentUser.name}</p>
             <p className="mt-1 text-sm text-indigo-700">{currentUser.role}</p>
           </div>
-          <nav className="mt-8 space-y-1.5">
+          <nav className="mt-6 space-y-1">
             {[
               "Dashboard",
               currentUser.role === "Admin" ? "User management" : currentUser.role === "Manager" ? "Team tasks" : "My daily updates",
               "Projects",
               ...(currentUser.role === "Employee" ? [] : ["Reports"]),
             ].map((item) => (
-              <a key={item} href={`#${sectionTarget(item)}`} onClick={(event) => { event.preventDefault(); navigateTo(item); }} className="block w-full rounded-xl px-4 py-3 text-left text-sm font-medium text-slate-600 hover:bg-indigo-50 hover:text-indigo-700">{item}</a>
+              <a key={item} href={`#${sectionTarget(item)}`} onClick={(event) => { event.preventDefault(); navigateTo(item); }} className="block w-full rounded-xl px-3 py-2.5 text-left text-sm font-medium text-slate-600 hover:bg-indigo-50 hover:text-indigo-700">{item}</a>
             ))}
           </nav>
           <button
             onClick={() => setCurrentUserId(null)}
-            className="mt-8 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-600 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"
+            className="mt-6 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-semibold text-slate-600 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"
           >
             Sign out
           </button>
@@ -1009,7 +1009,7 @@ export default function Home() {
           </nav>
         </div>
 
-        <section className="min-w-0 flex-1 overflow-x-hidden p-4 sm:p-6 md:p-10">
+        <section className="min-w-0 flex-1 overflow-x-hidden p-4 sm:p-6 md:p-8">
           <div id="dashboard" className="mx-auto w-full max-w-7xl">
             <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
               <div>
