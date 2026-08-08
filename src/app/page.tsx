@@ -707,7 +707,15 @@ export default function Home() {
                           <td colSpan={3} className="px-3 py-3">
                             <div className="relative rounded-2xl border border-indigo-200 bg-indigo-50 p-4 text-indigo-950 shadow-sm">
                               <span className="absolute -top-2 left-6 h-4 w-4 rotate-45 border-l border-t border-indigo-200 bg-indigo-50" />
-                              <p className="relative text-xs font-bold uppercase tracking-wide text-indigo-600">Message details</p>
+                              <button
+                                type="button"
+                                onClick={() => setSelectedMessageId(null)}
+                                aria-label="Close message details"
+                                className="absolute right-3 top-3 rounded-full px-2 py-1 text-lg leading-none text-indigo-500 hover:bg-indigo-200 hover:text-indigo-900"
+                              >
+                                ×
+                              </button>
+                              <p className="relative pr-8 text-xs font-bold uppercase tracking-wide text-indigo-600">Message details</p>
                               <p className="relative mt-2 whitespace-pre-wrap text-sm">{note.text}</p>
                               <p className="relative mt-3 text-xs text-indigo-700">Sent by {getUserName(note.authorId)} · {formatTimestamp(note.createdAt)} · {getProjectName(task.projectId)} · {task.title}</p>
                             </div>
