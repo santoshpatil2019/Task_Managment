@@ -229,7 +229,7 @@ export default function Home() {
   const getProjectName = (id: string) =>
     projects.find((project) => project.id === id)?.name ?? "Unknown project";
 
-  const navigateTo = (item: string) => {
+  const sectionTarget = (item: string) => {
     const targets: Record<string, string> = {
       Dashboard: "dashboard",
       "User management": "user-management",
@@ -237,7 +237,11 @@ export default function Home() {
       "My daily updates": "tasks",
       Projects: "projects",
     };
-    document.getElementById(targets[item] ?? "dashboard")?.scrollIntoView({
+    return targets[item] ?? "dashboard";
+  };
+
+  const navigateTo = (item: string) => {
+    document.getElementById(sectionTarget(item))?.scrollIntoView({
       behavior: "smooth",
       block: "start",
     });
@@ -581,7 +585,7 @@ export default function Home() {
               currentUser.role === "Admin" ? "User management" : currentUser.role === "Manager" ? "Team tasks" : "My daily updates",
               "Projects",
             ].map((item) => (
-              <button key={item} onClick={() => navigateTo(item)} className="w-full rounded-lg px-4 py-3 text-left text-sm font-medium hover:bg-indigo-50 hover:text-indigo-600">{item}</button>
+              <a key={item} href={`#${sectionTarget(item)}`} onClick={(event) => { event.preventDefault(); navigateTo(item); }} className="block w-full rounded-lg px-4 py-3 text-left text-sm font-medium hover:bg-indigo-50 hover:text-indigo-600">{item}</a>
             ))}
           </nav>
           <button
@@ -607,9 +611,9 @@ export default function Home() {
           </div>
           <nav className="mt-4 flex flex-wrap gap-2">
             {["Dashboard", currentUser.role === "Admin" ? "User management" : currentUser.role === "Manager" ? "Team tasks" : "My daily updates", "Projects"].map((item) => (
-              <button key={item} onClick={() => navigateTo(item)} className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-medium text-slate-700">
+              <a key={item} href={`#${sectionTarget(item)}`} onClick={(event) => { event.preventDefault(); navigateTo(item); }} className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-medium text-slate-700">
                 {item}
-              </button>
+              </a>
             ))}
           </nav>
         </div>
