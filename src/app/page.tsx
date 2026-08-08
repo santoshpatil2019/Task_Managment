@@ -304,6 +304,22 @@ export default function Home() {
     users.find((user) => user.id === id)?.name ?? "Unassigned";
   const getProjectName = (id: string) =>
     projects.find((project) => project.id === id)?.name ?? "Unknown project";
+  const getProjectStatus = (projectId: string): TaskStatus => {
+    const projectTasks = visibleTasks.filter((task) => task.projectId === projectId);
+    if (projectTasks.length === 0) return "Not started";
+    if (projectTasks.every((task) => task.status === "Complete")) return "Complete";
+    if (projectTasks.some((task) => task.status === "Blocked")) return "Blocked";
+    if (projectTasks.some((task) => task.status === "In progress" || task.progress > 0)) {
+      return "In progress";
+    }
+    return "Not started";
+  };
+  const projectStatusClass = (status: TaskStatus) => {
+    if (status === "Complete") return "bg-emerald-50 text-emerald-700";
+    if (status === "Blocked") return "bg-red-50 text-red-700";
+    if (status === "In progress") return "bg-indigo-50 text-indigo-700";
+    return "bg-slate-100 text-slate-600";
+  };
 
   const formatTimestamp = (timestamp?: string) => {
     if (!timestamp) return "Not recorded";
@@ -1041,7 +1057,8 @@ export default function Home() {
               <button onClick={() => setNotice("")} className="mt-6 w-full rounded-lg bg-emerald-50 px-4 py-3 text-left text-sm text-emerald-800">{notice} <span className="float-right">×</span></button>
             )}
 
-            <div className="mt-8 grid gap-4 sm:grid-cols-2 2xl:grid-cols-4">
+            <div className="mt-8 grid gap-4 sm:grid-cols-2 2xl:grid-cols-5">
+              <div className="rounded-xl bg-white p-5 shadow-sm"><p className="text-sm text-slate-500">Projects</p><p className="mt-2 text-3xl font-bold text-indigo-600">{projects.length}</p></div>
               <div className="rounded-xl bg-white p-5 shadow-sm"><p className="text-sm text-slate-500">Visible tasks</p><p className="mt-2 text-3xl font-bold">{visibleTasks.length}</p></div>
               <div className="rounded-xl bg-white p-5 shadow-sm"><p className="text-sm text-slate-500">Pending</p><p className="mt-2 text-3xl font-bold text-orange-500">{pendingCount}</p></div>
               <div className="rounded-xl bg-white p-5 shadow-sm"><p className="text-sm text-slate-500">Completed</p><p className="mt-2 text-3xl font-bold text-green-600">{completedCount}</p></div>
@@ -1057,8 +1074,8 @@ export default function Home() {
             )}
 
             <div id="projects" className="mt-8 rounded-xl bg-white p-6 shadow-sm">
-              <div className="flex items-center justify-between"><div><h3 className="text-xl font-bold">Projects</h3><p className="mt-1 text-sm text-slate-500">{currentUser.role === "Admin" ? "Admin controls project creation." : "Projects connected to your tasks."}</p></div>{currentUser.role === "Admin" && <button onClick={() => setModal("project")} className="rounded-lg bg-slate-100 px-4 py-2 text-sm font-semibold text-indigo-600">+ Add project</button>}</div>
-              <div className="mt-5 grid gap-4 sm:grid-cols-2 2xl:grid-cols-3">{projects.map((project) => { const projectTasks = tasks.filter((task) => task.projectId === project.id); const subtaskCount = projectTasks.filter((task) => task.parentId).length; return <div key={project.id} className="rounded-lg border border-slate-200 p-4"><p className="break-words font-semibold">{project.name}</p><p className="mt-2 text-sm text-slate-500">{project.description}</p><p className="mt-3 text-xs text-indigo-600">{projectTasks.length} tasks · {subtaskCount} subtasks</p></div>; })}</div>
+              <div className="flex items-center justify-between"><div><h3 className="text-xl font-bold">Projects <span className="text-base font-medium text-slate-400">({projects.length})</span></h3><p className="mt-1 text-sm text-slate-500">{currentUser.role === "Admin" ? "Admin controls project creation." : "Projects connected to your tasks."}</p></div>{currentUser.role === "Admin" && <button onClick={() => setModal("project")} className="rounded-lg bg-slate-100 px-4 py-2 text-sm font-semibold text-indigo-600">+ Add project</button>}</div>
+              <div className="mt-5 grid gap-4 sm:grid-cols-2 2xl:grid-cols-3">{projects.map((project) => { const projectTasks = tasks.filter((task) => task.projectId === project.id); const subtaskCount = projectTasks.filter((task) => task.parentId).length; const projectStatus = getProjectStatus(project.id); return <div key={project.id} className="rounded-lg border border-slate-200 p-4"><div className="flex items-start justify-between gap-3"><p className="break-words font-semibold">{project.name}</p><span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${projectStatusClass(projectStatus)}`}>{projectStatus}</span></div><p className="mt-2 text-sm text-slate-500">{project.description}</p><p className="mt-3 text-xs text-indigo-600">{projectTasks.length} tasks · {subtaskCount} subtasks</p></div>; })}</div>
             </div>
 
             <div id="tasks" className="mt-8 rounded-xl bg-slate-100 p-6">
