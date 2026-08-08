@@ -265,6 +265,16 @@ export default function Home() {
       return timeDifference || first.title.localeCompare(second.title);
     });
 
+  const sortNotesAscending = (items: Note[]) =>
+    [...items].sort((first, second) => {
+      const firstTime = Date.parse(first.createdAt);
+      const secondTime = Date.parse(second.createdAt);
+      if (Number.isNaN(firstTime) || Number.isNaN(secondTime)) {
+        return first.createdAt.localeCompare(second.createdAt);
+      }
+      return firstTime - secondTime;
+    });
+
   const sectionTarget = (item: string) => {
     const targets: Record<string, string> = {
       Dashboard: "dashboard",
@@ -411,7 +421,7 @@ export default function Home() {
         taskId,
         text: noteText.trim(),
         authorId: currentUser.id,
-        createdAt: new Date().toLocaleString(),
+        createdAt: new Date().toISOString(),
       },
       ...current,
     ]);
@@ -580,15 +590,13 @@ export default function Home() {
     const children = sortTasksAscending(
       visibleTasks.filter((child) => child.parentId === task.id),
     );
-    const taskNotes = notes
-      .filter((note) => note.taskId === task.id)
-      .sort((first, second) => first.createdAt.localeCompare(second.createdAt));
+    const taskNotes = sortNotesAscending(notes.filter((note) => note.taskId === task.id));
     const canEditTask = currentUser?.role === "Employee" && task.assigneeId === currentUser.id;
     const edit = canEditTask ? getEmployeeEdit(task) : null;
     const rows: React.ReactNode[] = [
       <tr key={task.id} className="border-t border-slate-200 align-top hover:bg-slate-50">
         <td className="px-3 py-4" style={{ paddingLeft: `${12 + depth * 24}px` }}>
-          <div className="flex min-w-64 items-start gap-2">
+          <div className="flex min-w-0 items-start gap-2">
             {depth > 0 && <span className="pt-0.5 text-indigo-400">↳</span>}
             <div>
               <p className="font-semibold text-slate-900">{task.title}</p>
@@ -597,27 +605,27 @@ export default function Home() {
             </div>
           </div>
         </td>
-        <td className="whitespace-nowrap px-3 py-4">
+        <td className="px-3 py-4 break-words">
           <span className="rounded-full bg-indigo-50 px-2 py-1 text-xs text-indigo-700">{task.status}</span>
         </td>
-        <td className="whitespace-nowrap px-3 py-4 text-xs text-slate-600">{task.priority}</td>
-        <td className="min-w-32 px-3 py-4">
+        <td className="px-3 py-4 break-words text-xs text-slate-600">{task.priority}</td>
+        <td className="px-3 py-4">
           <div className="flex items-center gap-2">
-            <div className="h-2 w-24 rounded-full bg-slate-100">
+            <div className="h-2 w-12 rounded-full bg-slate-100 sm:w-20">
               <div className="h-2 rounded-full bg-indigo-600" style={{ width: `${task.progress}%` }} />
             </div>
             <span className="text-xs font-semibold text-indigo-600">{task.progress}%</span>
           </div>
         </td>
-        <td className="whitespace-nowrap px-3 py-4 text-xs text-slate-600">{task.due}</td>
-        <td className="whitespace-nowrap px-3 py-4 text-xs font-semibold text-slate-700">{getUserName(task.assigneeId)}</td>
-        <td className="whitespace-nowrap px-3 py-4 text-xs font-semibold text-slate-700">{getUserName(task.createdById)}</td>
-        <td className="whitespace-nowrap px-3 py-4 text-xs text-slate-500">{formatTimestamp(task.createdAt)}</td>
+        <td className="px-3 py-4 break-words text-xs text-slate-600">{task.due}</td>
+        <td className="px-3 py-4 break-words text-xs font-semibold text-slate-700">{getUserName(task.assigneeId)}</td>
+        <td className="px-3 py-4 break-words text-xs font-semibold text-slate-700">{getUserName(task.createdById)}</td>
+        <td className="px-3 py-4 break-words text-xs text-slate-500">{formatTimestamp(task.createdAt)}</td>
         <td className="px-3 py-4">
           {currentUser?.role === "Manager" && (
             <button
               onClick={() => setNoteTaskId(noteTaskId === task.id ? null : task.id)}
-              className="whitespace-nowrap rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700"
+              className="rounded-lg bg-slate-100 px-2 py-2 text-xs font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700"
             >
               {taskNotes.length ? `${taskNotes.length} notes` : "Add note"}
             </button>
@@ -642,13 +650,25 @@ export default function Home() {
               </button>
             </div>
             {taskNotes.length > 0 && (
-              <div className="mt-3 space-y-2">
-                {taskNotes.map((note) => (
-                  <div key={note.id} className="flex flex-col gap-1 rounded-lg bg-white p-3 text-sm text-amber-900 sm:flex-row sm:items-center sm:justify-between">
-                    <span>{note.text}</span>
-                    <span className="whitespace-nowrap text-xs text-amber-700">{getUserName(note.authorId)} · {formatTimestamp(note.createdAt)}</span>
-                  </div>
-                ))}
+              <div className="mt-3 overflow-hidden rounded-lg border border-amber-100 bg-white">
+                <table className="w-full table-fixed text-left text-xs">
+                  <thead className="bg-amber-50 text-amber-700">
+                    <tr>
+                      <th className="w-[55%] px-3 py-2 font-semibold">Note</th>
+                      <th className="w-[20%] px-3 py-2 font-semibold">Added by</th>
+                      <th className="w-[25%] px-3 py-2 font-semibold">Time</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {taskNotes.map((note) => (
+                      <tr key={note.id} className="border-t border-amber-100 align-top text-amber-900">
+                        <td className="break-words px-3 py-2">{note.text}</td>
+                        <td className="break-words px-3 py-2">{getUserName(note.authorId)}</td>
+                        <td className="break-words px-3 py-2 text-amber-700">{formatTimestamp(note.createdAt)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </td>
@@ -840,8 +860,8 @@ export default function Home() {
 
             <div id="tasks" className="mt-8 rounded-xl bg-slate-100 p-6">
               <div className="flex items-center justify-between"><div><h3 className="text-xl font-bold">{currentUser.role === "Employee" ? "My daily updates" : "Team task board"}</h3><p className="mt-1 text-sm text-slate-500">{currentUser.role === "Manager" ? "Create tasks, subtasks, notes, and assignments for employees." : currentUser.role === "Employee" ? "Update your daily description, status, and completion percentage." : "View all work across the workspace."}</p></div>{currentUser.role === "Manager" && <button onClick={() => setModal("task")} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white">+ New task</button>}</div>
-              <div className="mt-5 overflow-x-auto rounded-xl border border-slate-200 bg-white">
-                <table className="min-w-[1180px] w-full text-left text-sm">
+              <div className="mt-5 rounded-xl border border-slate-200 bg-white">
+                <table className="w-full table-fixed text-left text-sm">
                   <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                     <tr>
                       <th className="px-3 py-3">Task / Subtask</th>
