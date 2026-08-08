@@ -35,6 +35,9 @@ type Task = {
   createdById: string;
   parentId: string | null;
   createdAt?: string;
+  assignedAt?: string;
+  dueDate?: string;
+  completedAt?: string;
 };
 
 type Note = {
@@ -112,6 +115,9 @@ const demoTasks: Task[] = [
     assigneeId: "user-employee",
     createdById: "user-manager",
     parentId: null,
+    createdAt: "2026-08-07T09:00:00.000Z",
+    assignedAt: "2026-08-07T09:00:00.000Z",
+    dueDate: "2026-08-12",
   },
   {
     id: "task-requirements",
@@ -125,6 +131,9 @@ const demoTasks: Task[] = [
     assigneeId: "user-employee",
     createdById: "user-manager",
     parentId: null,
+    createdAt: "2026-08-08T09:30:00.000Z",
+    assignedAt: "2026-08-08T09:30:00.000Z",
+    dueDate: "2026-08-14",
   },
   {
     id: "task-docs",
@@ -138,6 +147,10 @@ const demoTasks: Task[] = [
     assigneeId: "user-employee",
     createdById: "user-manager",
     parentId: null,
+    createdAt: "2026-08-05T10:00:00.000Z",
+    assignedAt: "2026-08-05T10:00:00.000Z",
+    dueDate: "2026-08-09",
+    completedAt: "2026-08-08T16:30:00.000Z",
   },
 ];
 
@@ -183,6 +196,31 @@ const demoProgressLogs: ProgressLog[] = [
 const makeId = (prefix: string) =>
   `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
+const getLegacyDueDate = (due?: string) => {
+  if (!due || /^\d{4}-\d{2}-\d{2}$/.test(due)) return due;
+  const date = new Date();
+  date.setHours(0, 0, 0, 0);
+  if (due === "Tomorrow") date.setDate(date.getDate() + 1);
+  else if (due !== "Today") {
+    const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    const targetDay = days.indexOf(due);
+    if (targetDay < 0) return undefined;
+    date.setDate(date.getDate() + ((targetDay - date.getDay() + 7) % 7 || 7));
+  }
+  return date.toISOString().slice(0, 10);
+};
+
+const normalizeTaskDates = (items: Task[]) =>
+  items.map((task, index) => {
+    const assignedAt = task.assignedAt ?? task.createdAt ?? new Date(Date.now() - (index + 1) * 24 * 60 * 60 * 1000).toISOString();
+    return {
+      ...task,
+      assignedAt,
+      dueDate: task.dueDate ?? getLegacyDueDate(task.due),
+      completedAt: task.completedAt ?? (task.status === "Complete" ? task.createdAt : undefined),
+    };
+  });
+
 export default function Home() {
   const [users, setUsers] = useState<User[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -210,7 +248,7 @@ export default function Home() {
   const [newTaskDescription, setNewTaskDescription] = useState("");
   const [newTaskProjectId, setNewTaskProjectId] = useState("");
   const [newTaskAssigneeId, setNewTaskAssigneeId] = useState("");
-  const [newTaskDue, setNewTaskDue] = useState("Today");
+  const [newTaskDue, setNewTaskDue] = useState(() => new Date().toISOString().slice(0, 10));
   const [newTaskPriority, setNewTaskPriority] = useState<Task["priority"]>(
     "Medium",
   );
@@ -233,20 +271,20 @@ export default function Home() {
         const data = JSON.parse(saved);
         setUsers(data.users ?? demoUsers);
         setProjects(data.projects ?? demoProjects);
-        setTasks(data.tasks ?? demoTasks);
+        setTasks(normalizeTaskDates(data.tasks ?? demoTasks));
         setNotes(data.notes ?? []);
         setProgressLogs(data.progressLogs ?? demoProgressLogs);
       } catch {
         setUsers(demoUsers);
         setProjects(demoProjects);
-        setTasks(demoTasks);
+        setTasks(normalizeTaskDates(demoTasks));
         setNotes([]);
         setProgressLogs(demoProgressLogs);
       }
     } else {
       setUsers(demoUsers);
       setProjects(demoProjects);
-      setTasks(demoTasks);
+      setTasks(normalizeTaskDates(demoTasks));
       setNotes([]);
       setProgressLogs(demoProgressLogs);
     }
@@ -329,6 +367,22 @@ export default function Home() {
       dateStyle: "medium",
       timeStyle: "short",
     });
+  };
+  const formatDateOnly = (dateValue?: string) => {
+    if (!dateValue) return "Not recorded";
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(dateValue)
+      ? new Date(`${dateValue}T00:00:00`)
+      : new Date(dateValue);
+    if (Number.isNaN(date.getTime())) return dateValue;
+    return date.toLocaleDateString("en-IN", { dateStyle: "medium" });
+  };
+  const getAssignedAt = (task: Task) => task.assignedAt ?? task.createdAt;
+  const getTaskDaysFromAssignment = (task: Task) => {
+    const assignedAt = Date.parse(getAssignedAt(task) ?? "");
+    if (Number.isNaN(assignedAt)) return "Not recorded";
+    const endAt = task.completedAt ? Date.parse(task.completedAt) : Date.now();
+    if (Number.isNaN(endAt)) return "Not recorded";
+    return `${Math.max(0, Math.ceil((endAt - assignedAt) / (24 * 60 * 60 * 1000)))} days`;
   };
 
   const isNewMessage = (note: Note) => {
@@ -486,6 +540,7 @@ export default function Home() {
     const parentTask = tasks.find((task) => task.id === newTaskParentId);
     const parentId = parentTask?.projectId === projectId ? parentTask.id : null;
 
+    const assignedAt = new Date().toISOString();
     setTasks((current) => [
       {
         id: makeId("task"),
@@ -499,7 +554,9 @@ export default function Home() {
         assigneeId,
         createdById: currentUser.id,
         parentId,
-        createdAt: new Date().toISOString(),
+        createdAt: assignedAt,
+        assignedAt,
+        dueDate: newTaskDue,
       },
       ...current,
     ]);
@@ -552,10 +609,16 @@ export default function Home() {
     if (!currentUser || currentUser.role !== "Employee") return;
     const edit = getEmployeeEdit(task);
     const createdAt = new Date().toISOString();
+    const progress = Math.min(100, Math.max(0, edit.progress));
     setTasks((current) =>
       current.map((item) =>
         item.id === task.id
-          ? { ...item, ...edit, progress: Math.min(100, Math.max(0, edit.progress)) }
+          ? {
+              ...item,
+              ...edit,
+              progress,
+              completedAt: edit.status === "Complete" ? item.completedAt ?? createdAt : undefined,
+            }
           : item,
       ),
     );
@@ -566,7 +629,7 @@ export default function Home() {
         employeeId: currentUser.id,
         description: edit.description,
         status: edit.status,
-        progress: Math.min(100, Math.max(0, edit.progress)),
+        progress,
         createdAt,
       },
       ...current,
@@ -734,10 +797,13 @@ export default function Home() {
             <span className="text-xs font-semibold text-indigo-600">{task.progress}%</span>
           </div>
         </td>
-        <td className="px-3 py-4 break-words text-xs text-slate-600">{task.due}</td>
+        <td className="px-3 py-4 break-words text-xs text-slate-600">{formatDateOnly(getAssignedAt(task))}</td>
+        <td className="px-3 py-4 break-words text-xs text-slate-600">{formatDateOnly(task.dueDate) === "Not recorded" ? task.due : formatDateOnly(task.dueDate)}</td>
+        <td className="px-3 py-4 break-words text-xs font-semibold text-slate-600">{getTaskDaysFromAssignment(task)}</td>
         <td className="px-3 py-4 break-words text-xs font-semibold text-slate-700">{getUserName(task.assigneeId)}</td>
         <td className="px-3 py-4 break-words text-xs font-semibold text-slate-700">{getUserName(task.createdById)}</td>
         <td className="px-3 py-4 break-words text-xs text-slate-500">{formatTimestamp(task.createdAt)}</td>
+        <td className="px-3 py-4 break-words text-xs text-slate-600">{formatTimestamp(task.completedAt)}</td>
         <td className="px-3 py-4">
           {canAddNote && (
             <button
@@ -754,7 +820,7 @@ export default function Home() {
     if (canAddNote && noteTaskId === task.id) {
       rows.push(
         <tr key={`${task.id}-notes`} className="border-t border-slate-100 bg-amber-50/40">
-          <td colSpan={9} className="px-4 py-4">
+          <td colSpan={12} className="px-4 py-4">
             <div className="flex flex-col gap-2 sm:flex-row">
               <input
                 value={noteText}
@@ -821,7 +887,7 @@ export default function Home() {
     if (canEditTask && edit) {
       rows.push(
         <tr key={`${task.id}-update`} className="border-t border-slate-100 bg-indigo-50/30">
-          <td colSpan={9} className="px-4 py-4">
+          <td colSpan={12} className="px-4 py-4">
             <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_240px]">
               <textarea
                 value={edit.description}
@@ -1088,10 +1154,13 @@ export default function Home() {
                       <th className="px-3 py-3">Status</th>
                       <th className="px-3 py-3">Priority</th>
                       <th className="px-3 py-3">Progress</th>
-                      <th className="px-3 py-3">Due</th>
+                      <th className="px-3 py-3">Assigned date</th>
+                      <th className="px-3 py-3">Due date</th>
+                      <th className="px-3 py-3">Days from assigned</th>
                       <th className="px-3 py-3">Assigned to</th>
                       <th className="px-3 py-3">Assigned by</th>
                       <th className="px-3 py-3">Created</th>
+                      <th className="px-3 py-3">Completed date</th>
                       <th className="px-3 py-3">Actions</th>
                     </tr>
                   </thead>
@@ -1101,7 +1170,7 @@ export default function Home() {
                     return (
                       <tbody key={project.id}>
                         <tr className="border-t border-slate-200 bg-indigo-50/60">
-                          <td colSpan={9} className="px-3 py-3">
+                          <td colSpan={12} className="px-3 py-3">
                             <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
                               <span className="font-bold text-indigo-900">Project: {project.name}</span>
                               <span className="text-xs text-indigo-700">{projectTaskCount} items · sorted oldest first</span>
@@ -1111,14 +1180,14 @@ export default function Home() {
                         </tr>
                         {projectRootTasks.length ? projectRootTasks.flatMap((task) => renderTaskRow(task)) : (
                           <tr>
-                            <td colSpan={9} className="px-3 py-5 text-center text-sm text-slate-500">No tasks in this project yet.</td>
+                            <td colSpan={12} className="px-3 py-5 text-center text-sm text-slate-500">No tasks in this project yet.</td>
                           </tr>
                         )}
                       </tbody>
                     );
                   })}
                   {projects.length === 0 && (
-                    <tbody><tr><td colSpan={9} className="px-3 py-6 text-center text-slate-500">No projects available.</td></tr></tbody>
+                    <tbody><tr><td colSpan={12} className="px-3 py-6 text-center text-slate-500">No projects available.</td></tr></tbody>
                   )}
                 </table>
               </div>
@@ -1227,7 +1296,7 @@ export default function Home() {
       )}
 
       {modal === "task" && currentUser.role === "Manager" && (
-        <div className="fixed inset-0 z-20 flex items-center justify-center overflow-y-auto bg-slate-900/40 p-4"><div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl"><div className="flex items-center justify-between"><div><h2 className="text-xl font-bold">Create task or subtask</h2><p className="mt-1 text-sm text-slate-500">Managers can assign work to employees.</p></div><button onClick={() => setModal(null)} className="text-xl text-slate-400">×</button></div><form onSubmit={createTask} className="mt-6 space-y-4"><input autoFocus value={newTaskTitle} onChange={(event) => setNewTaskTitle(event.target.value)} placeholder="Task title" className="w-full rounded-lg border px-4 py-3" /><textarea value={newTaskDescription} onChange={(event) => setNewTaskDescription(event.target.value)} placeholder="Task description" rows={3} className="w-full resize-none rounded-lg border px-4 py-3" /><div className="grid gap-4 md:grid-cols-2"><select value={newTaskProjectId || projects[0]?.id} onChange={(event) => setNewTaskProjectId(event.target.value)} className="rounded-lg border px-4 py-3">{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select><select value={newTaskAssigneeId || employees[0]?.id} onChange={(event) => setNewTaskAssigneeId(event.target.value)} className="rounded-lg border px-4 py-3">{employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.name}</option>)}</select><select value={newTaskParentId} onChange={(event) => setNewTaskParentId(event.target.value)} className="rounded-lg border px-4 py-3"><option value="">Top-level task</option>{tasks.filter((task) => !task.parentId).map((task) => <option key={task.id} value={task.id}>Subtask of: {task.title}</option>)}</select><select value={newTaskPriority} onChange={(event) => setNewTaskPriority(event.target.value as Task["priority"])} className="rounded-lg border px-4 py-3"><option>High</option><option>Medium</option><option>Low</option></select></div><input value={newTaskDue} onChange={(event) => setNewTaskDue(event.target.value)} placeholder="Due date or label" className="w-full rounded-lg border px-4 py-3" /><button className="w-full rounded-lg bg-indigo-600 px-4 py-3 font-semibold text-white">Create and assign task</button></form></div></div>
+        <div className="fixed inset-0 z-20 flex items-center justify-center overflow-y-auto bg-slate-900/40 p-4"><div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl"><div className="flex items-center justify-between"><div><h2 className="text-xl font-bold">Create task or subtask</h2><p className="mt-1 text-sm text-slate-500">Managers can assign work to employees.</p></div><button onClick={() => setModal(null)} className="text-xl text-slate-400">×</button></div><form onSubmit={createTask} className="mt-6 space-y-4"><input autoFocus value={newTaskTitle} onChange={(event) => setNewTaskTitle(event.target.value)} placeholder="Task title" className="w-full rounded-lg border px-4 py-3" /><textarea value={newTaskDescription} onChange={(event) => setNewTaskDescription(event.target.value)} placeholder="Task description" rows={3} className="w-full resize-none rounded-lg border px-4 py-3" /><div className="grid gap-4 md:grid-cols-2"><select value={newTaskProjectId || projects[0]?.id} onChange={(event) => setNewTaskProjectId(event.target.value)} className="rounded-lg border px-4 py-3">{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select><select value={newTaskAssigneeId || employees[0]?.id} onChange={(event) => setNewTaskAssigneeId(event.target.value)} className="rounded-lg border px-4 py-3">{employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.name}</option>)}</select><select value={newTaskParentId} onChange={(event) => setNewTaskParentId(event.target.value)} className="rounded-lg border px-4 py-3"><option value="">Top-level task</option>{tasks.filter((task) => !task.parentId).map((task) => <option key={task.id} value={task.id}>Subtask of: {task.title}</option>)}</select><select value={newTaskPriority} onChange={(event) => setNewTaskPriority(event.target.value as Task["priority"])} className="rounded-lg border px-4 py-3"><option>High</option><option>Medium</option><option>Low</option></select></div><label className="block text-sm font-semibold text-slate-700">Due date<input type="date" value={newTaskDue} onChange={(event) => setNewTaskDue(event.target.value)} className="mt-1 w-full rounded-lg border px-4 py-3 font-normal" /></label><button className="w-full rounded-lg bg-indigo-600 px-4 py-3 font-semibold text-white">Create and assign task</button></form></div></div>
       )}
     </main>
   );
