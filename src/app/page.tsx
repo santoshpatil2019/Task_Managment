@@ -259,6 +259,12 @@ export default function Home() {
     });
   };
 
+  const isNewMessage = (note: Note) => {
+    if (!currentUser || note.authorId === currentUser.id) return false;
+    const createdAt = Date.parse(note.createdAt);
+    return !Number.isNaN(createdAt) && Date.now() - createdAt < 24 * 60 * 60 * 1000;
+  };
+
   const sortTasksAscending = (items: Task[]) =>
     [...items].sort((first, second) => {
       const timeDifference = (first.createdAt ?? "").localeCompare(second.createdAt ?? "");
@@ -665,8 +671,11 @@ export default function Home() {
                   </thead>
                   <tbody>
                     {taskNotes.map((note) => (
-                      <tr key={note.id} className="border-t border-amber-100 align-top text-amber-900">
-                        <td className="break-words px-3 py-2">{note.text}</td>
+                      <tr key={note.id} className={`border-t border-amber-100 align-top text-amber-900 ${isNewMessage(note) ? "animate-pulse bg-yellow-200 font-semibold shadow-[inset_0_0_0_2px_rgb(245_158_11)]" : ""}`}>
+                        <td className="break-words px-3 py-2">
+                          {isNewMessage(note) && <span className="mr-2 rounded-full bg-orange-500 px-2 py-0.5 text-[10px] font-bold uppercase text-white">NEW</span>}
+                          {note.text}
+                        </td>
                         <td className="break-words px-3 py-2">{getUserName(note.authorId)}</td>
                         <td className="break-words px-3 py-2 text-amber-700">{formatTimestamp(note.createdAt)}</td>
                       </tr>
