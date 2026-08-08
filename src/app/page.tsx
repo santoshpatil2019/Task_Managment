@@ -210,14 +210,17 @@ const getLegacyDueDate = (due?: string) => {
   return date.toISOString().slice(0, 10);
 };
 
-const normalizeTaskDates = (items: Task[]) =>
+const normalizeTaskDates = (items: Task[], progressLogs: ProgressLog[] = []) =>
   items.map((task, index) => {
     const assignedAt = task.assignedAt ?? task.createdAt ?? new Date(Date.now() - (index + 1) * 24 * 60 * 60 * 1000).toISOString();
+    const completionLog = progressLogs
+      .filter((log) => log.taskId === task.id && log.status === "Complete")
+      .sort((first, second) => second.createdAt.localeCompare(first.createdAt))[0];
     return {
       ...task,
       assignedAt,
       dueDate: task.dueDate ?? getLegacyDueDate(task.due),
-      completedAt: task.completedAt ?? (task.status === "Complete" ? task.createdAt : undefined),
+      completedAt: task.completedAt ?? (task.status === "Complete" ? task.createdAt ?? completionLog?.createdAt : undefined),
     };
   });
 
@@ -271,20 +274,20 @@ export default function Home() {
         const data = JSON.parse(saved);
         setUsers(data.users ?? demoUsers);
         setProjects(data.projects ?? demoProjects);
-        setTasks(normalizeTaskDates(data.tasks ?? demoTasks));
+        setTasks(normalizeTaskDates(data.tasks ?? demoTasks, data.progressLogs ?? demoProgressLogs));
         setNotes(data.notes ?? []);
         setProgressLogs(data.progressLogs ?? demoProgressLogs);
       } catch {
         setUsers(demoUsers);
         setProjects(demoProjects);
-        setTasks(normalizeTaskDates(demoTasks));
+        setTasks(normalizeTaskDates(demoTasks, demoProgressLogs));
         setNotes([]);
         setProgressLogs(demoProgressLogs);
       }
     } else {
       setUsers(demoUsers);
       setProjects(demoProjects);
-      setTasks(normalizeTaskDates(demoTasks));
+      setTasks(normalizeTaskDates(demoTasks, demoProgressLogs));
       setNotes([]);
       setProgressLogs(demoProgressLogs);
     }
