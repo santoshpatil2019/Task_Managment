@@ -880,7 +880,7 @@ export default function Home() {
   }
 
   const rootTasks = visibleTasks.filter((task) => !task.parentId);
-  const reportStart = useMemo(() => {
+  const reportStart = (() => {
     const start = new Date();
     start.setHours(0, 0, 0, 0);
     if (reportPeriod === "Monthly") {
@@ -890,7 +890,7 @@ export default function Home() {
       start.setDate(start.getDate() - daysSinceMonday);
     }
     return start;
-  }, [reportPeriod]);
+  })();
   const reportTaskIds = new Set(visibleTasks.map((task) => task.id));
   const reportLogs = progressLogs
     .filter((log) => reportTaskIds.has(log.taskId))
