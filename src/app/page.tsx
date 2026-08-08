@@ -455,9 +455,12 @@ export default function Home() {
                 </span>
               </div>
               <p className="mt-2 text-sm text-slate-500">{task.description}</p>
-              <p className="mt-2 text-xs text-slate-400">
-                {getProjectName(task.projectId)} · Due {task.due} · Assigned to {getUserName(task.assigneeId)}
-              </p>
+              <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400">
+                <span>Project: {getProjectName(task.projectId)}</span>
+                <span>Due: {task.due}</span>
+                <span>Assigned to: <strong className="font-semibold text-slate-600">{getUserName(task.assigneeId)}</strong></span>
+                <span>Assigned by: <strong className="font-semibold text-slate-600">{getUserName(task.createdById)}</strong></span>
+              </div>
             </div>
             <div className="w-full lg:min-w-32 lg:text-right">
               <p className="text-sm font-semibold text-indigo-600">{task.progress}%</p>
