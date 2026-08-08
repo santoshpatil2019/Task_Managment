@@ -265,14 +265,14 @@ export default function Home() {
       return timeDifference || first.title.localeCompare(second.title);
     });
 
-  const sortNotesAscending = (items: Note[]) =>
+  const sortNotesNewestFirst = (items: Note[]) =>
     [...items].sort((first, second) => {
       const firstTime = Date.parse(first.createdAt);
       const secondTime = Date.parse(second.createdAt);
       if (Number.isNaN(firstTime) || Number.isNaN(secondTime)) {
-        return first.createdAt.localeCompare(second.createdAt);
+        return second.createdAt.localeCompare(first.createdAt);
       }
-      return firstTime - secondTime;
+      return secondTime - firstTime;
     });
 
   const sectionTarget = (item: string) => {
@@ -590,7 +590,7 @@ export default function Home() {
     const children = sortTasksAscending(
       visibleTasks.filter((child) => child.parentId === task.id),
     );
-    const taskNotes = sortNotesAscending(notes.filter((note) => note.taskId === task.id));
+    const taskNotes = sortNotesNewestFirst(notes.filter((note) => note.taskId === task.id));
     const canEditTask = currentUser?.role === "Employee" && task.assigneeId === currentUser.id;
     const edit = canEditTask ? getEmployeeEdit(task) : null;
     const rows: React.ReactNode[] = [
