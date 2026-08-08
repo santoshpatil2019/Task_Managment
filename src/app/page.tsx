@@ -414,7 +414,10 @@ export default function Home() {
   };
 
   const addNote = (taskId: string) => {
-    if (!currentUser || currentUser.role !== "Manager" || !noteText.trim()) return;
+    const task = tasks.find((item) => item.id === taskId);
+    const canAddNote = currentUser?.role === "Manager" ||
+      (currentUser?.role === "Employee" && task?.assigneeId === currentUser.id);
+    if (!currentUser || !canAddNote || !noteText.trim()) return;
     setNotes((current) => [
       {
         id: makeId("note"),
@@ -592,6 +595,7 @@ export default function Home() {
     );
     const taskNotes = sortNotesNewestFirst(notes.filter((note) => note.taskId === task.id));
     const canEditTask = currentUser?.role === "Employee" && task.assigneeId === currentUser.id;
+    const canAddNote = currentUser?.role === "Manager" || canEditTask;
     const edit = canEditTask ? getEmployeeEdit(task) : null;
     const rows: React.ReactNode[] = [
       <tr key={task.id} className="border-t border-slate-200 align-top hover:bg-slate-50">
@@ -622,7 +626,7 @@ export default function Home() {
         <td className="px-3 py-4 break-words text-xs font-semibold text-slate-700">{getUserName(task.createdById)}</td>
         <td className="px-3 py-4 break-words text-xs text-slate-500">{formatTimestamp(task.createdAt)}</td>
         <td className="px-3 py-4">
-          {currentUser?.role === "Manager" && (
+          {canAddNote && (
             <button
               onClick={() => setNoteTaskId(noteTaskId === task.id ? null : task.id)}
               className="rounded-lg bg-slate-100 px-2 py-2 text-xs font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700"
@@ -634,7 +638,7 @@ export default function Home() {
       </tr>,
     ];
 
-    if (currentUser?.role === "Manager" && noteTaskId === task.id) {
+    if (canAddNote && noteTaskId === task.id) {
       rows.push(
         <tr key={`${task.id}-notes`} className="border-t border-slate-100 bg-amber-50/40">
           <td colSpan={9} className="px-4 py-4">
@@ -689,16 +693,6 @@ export default function Home() {
                 placeholder="Add your daily status update in the description..."
               />
               <div className="space-y-2">
-                <select
-                  value={edit.status}
-                  onChange={(event) => updateEmployeeEdit(task, { status: event.target.value as TaskStatus })}
-                  className="w-full rounded-lg border bg-white px-3 py-2 text-sm"
-                >
-                  <option>Not started</option>
-                  <option>In progress</option>
-                  <option>Blocked</option>
-                  <option>Complete</option>
-                </select>
                 <div className="flex items-center gap-2">
                   <input
                     type="range"
