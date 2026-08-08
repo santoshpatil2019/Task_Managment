@@ -430,7 +430,7 @@ export default function Home() {
     ]);
     setNoteTaskId(null);
     setNoteText("");
-    setNotice("Note added.");
+    setNotice("Message sent.");
   };
 
   const getEmployeeEdit = (task: Task) =>
@@ -517,10 +517,10 @@ export default function Home() {
               </div>
               {noteTaskId === task.id && (
                 <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                  <input
-                    value={noteText}
-                    onChange={(event) => setNoteText(event.target.value)}
-                    placeholder="Write a note for the employee..."
+                <input
+                  value={noteText}
+                  onChange={(event) => setNoteText(event.target.value)}
+                  placeholder="Write a message..."
                     className="flex-1 rounded-lg border px-3 py-2 text-sm outline-none focus:border-indigo-500"
                   />
                   <button
@@ -631,7 +631,7 @@ export default function Home() {
               onClick={() => setNoteTaskId(noteTaskId === task.id ? null : task.id)}
               className="rounded-lg bg-slate-100 px-2 py-2 text-xs font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700"
             >
-              {taskNotes.length ? `${taskNotes.length} notes` : "Add note"}
+              {taskNotes.length ? `${taskNotes.length} messages` : "Add message"}
             </button>
           )}
         </td>
@@ -646,11 +646,11 @@ export default function Home() {
               <input
                 value={noteText}
                 onChange={(event) => setNoteText(event.target.value)}
-                placeholder="Write a note for the employee..."
+                placeholder="Write a message..."
                 className="flex-1 rounded-lg border bg-white px-3 py-2 text-sm outline-none focus:border-indigo-500"
               />
               <button onClick={() => addNote(task.id)} className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white">
-                Save note
+                Send message
               </button>
             </div>
             {taskNotes.length > 0 && (
@@ -658,8 +658,8 @@ export default function Home() {
                 <table className="w-full table-fixed text-left text-xs">
                   <thead className="bg-amber-50 text-amber-700">
                     <tr>
-                      <th className="w-[55%] px-3 py-2 font-semibold">Note</th>
-                      <th className="w-[20%] px-3 py-2 font-semibold">Added by</th>
+                      <th className="w-[55%] px-3 py-2 font-semibold">Message</th>
+                      <th className="w-[20%] px-3 py-2 font-semibold">Sent by</th>
                       <th className="w-[25%] px-3 py-2 font-semibold">Time</th>
                     </tr>
                   </thead>
@@ -853,7 +853,7 @@ export default function Home() {
             </div>
 
             <div id="tasks" className="mt-8 rounded-xl bg-slate-100 p-6">
-              <div className="flex items-center justify-between"><div><h3 className="text-xl font-bold">{currentUser.role === "Employee" ? "My daily updates" : "Team task board"}</h3><p className="mt-1 text-sm text-slate-500">{currentUser.role === "Manager" ? "Create tasks, subtasks, notes, and assignments for employees." : currentUser.role === "Employee" ? "Update your daily description, status, and completion percentage." : "View all work across the workspace."}</p></div>{currentUser.role === "Manager" && <button onClick={() => setModal("task")} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white">+ New task</button>}</div>
+              <div className="flex items-center justify-between"><div><h3 className="text-xl font-bold">{currentUser.role === "Employee" ? "My daily updates" : "Team task board"}</h3><p className="mt-1 text-sm text-slate-500">{currentUser.role === "Manager" ? "Create tasks, subtasks, messages, and assignments for employees." : currentUser.role === "Employee" ? "Update your daily description, progress, and messages." : "View all work across the workspace."}</p></div>{currentUser.role === "Manager" && <button onClick={() => setModal("task")} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white">+ New task</button>}</div>
               <div className="mt-5 rounded-xl border border-slate-200 bg-white">
                 <table className="w-full table-fixed text-left text-sm">
                   <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
