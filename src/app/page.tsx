@@ -923,7 +923,7 @@ export default function Home() {
               "Dashboard",
               currentUser.role === "Admin" ? "User management" : currentUser.role === "Manager" ? "Team tasks" : "My daily updates",
               "Projects",
-              "Reports",
+              ...(currentUser.role === "Employee" ? [] : ["Reports"]),
             ].map((item) => (
               <a key={item} href={`#${sectionTarget(item)}`} onClick={(event) => { event.preventDefault(); navigateTo(item); }} className="block w-full rounded-lg px-4 py-3 text-left text-sm font-medium hover:bg-indigo-50 hover:text-indigo-600">{item}</a>
             ))}
@@ -950,7 +950,7 @@ export default function Home() {
             </button>
           </div>
           <nav className="mt-4 flex flex-wrap gap-2">
-            {["Dashboard", currentUser.role === "Admin" ? "User management" : currentUser.role === "Manager" ? "Team tasks" : "My daily updates", "Projects", "Reports"].map((item) => (
+            {["Dashboard", currentUser.role === "Admin" ? "User management" : currentUser.role === "Manager" ? "Team tasks" : "My daily updates", "Projects", ...(currentUser.role === "Employee" ? [] : ["Reports"])].map((item) => (
               <a key={item} href={`#${sectionTarget(item)}`} onClick={(event) => { event.preventDefault(); navigateTo(item); }} className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-medium text-slate-700">
                 {item}
               </a>
@@ -1049,6 +1049,7 @@ export default function Home() {
               </div>
             </div>
 
+            {currentUser.role !== "Employee" && (
             <div id="reports" className="mt-8 rounded-xl bg-white p-6 shadow-sm">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div>
@@ -1135,6 +1136,7 @@ export default function Home() {
                 </div>
               </div>
             </div>
+            )}
 
             <p className="mt-6 text-center text-xs text-slate-400">Demo mode: data is stored in this browser. Production authentication and database persistence should be added before real users are invited.</p>
           </div>
