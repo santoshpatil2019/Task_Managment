@@ -34,6 +34,7 @@ type Task = {
   assigneeId: string;
   createdById: string;
   parentId: string | null;
+  createdAt?: string;
 };
 
 type Note = {
@@ -248,6 +249,22 @@ export default function Home() {
   const getProjectName = (id: string) =>
     projects.find((project) => project.id === id)?.name ?? "Unknown project";
 
+  const formatTimestamp = (timestamp?: string) => {
+    if (!timestamp) return "Not recorded";
+    const date = new Date(timestamp);
+    if (Number.isNaN(date.getTime())) return timestamp;
+    return date.toLocaleString("en-IN", {
+      dateStyle: "medium",
+      timeStyle: "short",
+    });
+  };
+
+  const sortTasksAscending = (items: Task[]) =>
+    [...items].sort((first, second) => {
+      const timeDifference = (first.createdAt ?? "").localeCompare(second.createdAt ?? "");
+      return timeDifference || first.title.localeCompare(second.title);
+    });
+
   const sectionTarget = (item: string) => {
     const targets: Record<string, string> = {
       Dashboard: "dashboard",
@@ -375,6 +392,7 @@ export default function Home() {
         assigneeId,
         createdById: currentUser.id,
         parentId,
+        createdAt: new Date().toISOString(),
       },
       ...current,
     ]);
@@ -558,6 +576,134 @@ export default function Home() {
     );
   };
 
+  const renderTaskRow = (task: Task, depth = 0): React.ReactNode[] => {
+    const children = sortTasksAscending(
+      visibleTasks.filter((child) => child.parentId === task.id),
+    );
+    const taskNotes = notes
+      .filter((note) => note.taskId === task.id)
+      .sort((first, second) => first.createdAt.localeCompare(second.createdAt));
+    const canEditTask = currentUser?.role === "Employee" && task.assigneeId === currentUser.id;
+    const edit = canEditTask ? getEmployeeEdit(task) : null;
+    const rows: React.ReactNode[] = [
+      <tr key={task.id} className="border-t border-slate-200 align-top hover:bg-slate-50">
+        <td className="px-3 py-4" style={{ paddingLeft: `${12 + depth * 24}px` }}>
+          <div className="flex min-w-64 items-start gap-2">
+            {depth > 0 && <span className="pt-0.5 text-indigo-400">↳</span>}
+            <div>
+              <p className="font-semibold text-slate-900">{task.title}</p>
+              <p className="mt-1 text-xs font-medium text-violet-700">{task.parentId ? "Subtask" : "Task"}</p>
+              <p className="mt-1 max-w-sm whitespace-normal text-xs text-slate-500">{task.description}</p>
+            </div>
+          </div>
+        </td>
+        <td className="whitespace-nowrap px-3 py-4">
+          <span className="rounded-full bg-indigo-50 px-2 py-1 text-xs text-indigo-700">{task.status}</span>
+        </td>
+        <td className="whitespace-nowrap px-3 py-4 text-xs text-slate-600">{task.priority}</td>
+        <td className="min-w-32 px-3 py-4">
+          <div className="flex items-center gap-2">
+            <div className="h-2 w-24 rounded-full bg-slate-100">
+              <div className="h-2 rounded-full bg-indigo-600" style={{ width: `${task.progress}%` }} />
+            </div>
+            <span className="text-xs font-semibold text-indigo-600">{task.progress}%</span>
+          </div>
+        </td>
+        <td className="whitespace-nowrap px-3 py-4 text-xs text-slate-600">{task.due}</td>
+        <td className="whitespace-nowrap px-3 py-4 text-xs font-semibold text-slate-700">{getUserName(task.assigneeId)}</td>
+        <td className="whitespace-nowrap px-3 py-4 text-xs font-semibold text-slate-700">{getUserName(task.createdById)}</td>
+        <td className="whitespace-nowrap px-3 py-4 text-xs text-slate-500">{formatTimestamp(task.createdAt)}</td>
+        <td className="px-3 py-4">
+          {currentUser?.role === "Manager" && (
+            <button
+              onClick={() => setNoteTaskId(noteTaskId === task.id ? null : task.id)}
+              className="whitespace-nowrap rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700"
+            >
+              {taskNotes.length ? `${taskNotes.length} notes` : "Add note"}
+            </button>
+          )}
+        </td>
+      </tr>,
+    ];
+
+    if (currentUser?.role === "Manager" && noteTaskId === task.id) {
+      rows.push(
+        <tr key={`${task.id}-notes`} className="border-t border-slate-100 bg-amber-50/40">
+          <td colSpan={9} className="px-4 py-4">
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <input
+                value={noteText}
+                onChange={(event) => setNoteText(event.target.value)}
+                placeholder="Write a note for the employee..."
+                className="flex-1 rounded-lg border bg-white px-3 py-2 text-sm outline-none focus:border-indigo-500"
+              />
+              <button onClick={() => addNote(task.id)} className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white">
+                Save note
+              </button>
+            </div>
+            {taskNotes.length > 0 && (
+              <div className="mt-3 space-y-2">
+                {taskNotes.map((note) => (
+                  <div key={note.id} className="flex flex-col gap-1 rounded-lg bg-white p-3 text-sm text-amber-900 sm:flex-row sm:items-center sm:justify-between">
+                    <span>{note.text}</span>
+                    <span className="whitespace-nowrap text-xs text-amber-700">{getUserName(note.authorId)} · {formatTimestamp(note.createdAt)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </td>
+        </tr>,
+      );
+    }
+
+    if (canEditTask && edit) {
+      rows.push(
+        <tr key={`${task.id}-update`} className="border-t border-slate-100 bg-indigo-50/30">
+          <td colSpan={9} className="px-4 py-4">
+            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_240px]">
+              <textarea
+                value={edit.description}
+                onChange={(event) => updateEmployeeEdit(task, { description: event.target.value })}
+                rows={2}
+                className="rounded-lg border bg-white px-3 py-2 text-sm outline-none focus:border-indigo-500"
+                placeholder="Add your daily status update in the description..."
+              />
+              <div className="space-y-2">
+                <select
+                  value={edit.status}
+                  onChange={(event) => updateEmployeeEdit(task, { status: event.target.value as TaskStatus })}
+                  className="w-full rounded-lg border bg-white px-3 py-2 text-sm"
+                >
+                  <option>Not started</option>
+                  <option>In progress</option>
+                  <option>Blocked</option>
+                  <option>Complete</option>
+                </select>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    value={edit.progress}
+                    onChange={(event) => updateEmployeeEdit(task, { progress: Number(event.target.value) })}
+                    className="w-full accent-indigo-600"
+                  />
+                  <span className="w-10 text-right text-sm font-semibold">{edit.progress}%</span>
+                </div>
+                <button onClick={() => saveEmployeeUpdate(task)} className="w-full rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700">
+                  Save daily update
+                </button>
+              </div>
+            </div>
+          </td>
+        </tr>,
+      );
+    }
+
+    children.forEach((child) => rows.push(...renderTaskRow(child, depth + 1)));
+    return rows;
+  };
+
   if (!hydrated) {
     return <main className="flex min-h-screen items-center justify-center bg-slate-50 text-slate-500">Loading Task Management...</main>;
   }
@@ -694,7 +840,48 @@ export default function Home() {
 
             <div id="tasks" className="mt-8 rounded-xl bg-slate-100 p-6">
               <div className="flex items-center justify-between"><div><h3 className="text-xl font-bold">{currentUser.role === "Employee" ? "My daily updates" : "Team task board"}</h3><p className="mt-1 text-sm text-slate-500">{currentUser.role === "Manager" ? "Create tasks, subtasks, notes, and assignments for employees." : currentUser.role === "Employee" ? "Update your daily description, status, and completion percentage." : "View all work across the workspace."}</p></div>{currentUser.role === "Manager" && <button onClick={() => setModal("task")} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white">+ New task</button>}</div>
-              <div className="mt-5 space-y-5">{projects.map((project) => { const projectRootTasks = rootTasks.filter((task) => task.projectId === project.id); const projectTaskCount = visibleTasks.filter((task) => task.projectId === project.id).length; return <section key={project.id} className="rounded-xl border border-slate-200 bg-white p-4"><div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between"><div><p className="text-xs font-semibold uppercase tracking-wide text-indigo-600">Project</p><h4 className="mt-1 text-lg font-bold">{project.name}</h4><p className="mt-1 text-sm text-slate-500">{project.description}</p></div><span className="text-xs font-medium text-slate-500">{projectTaskCount} tasks in hierarchy</span></div><div className="mt-4 space-y-3">{projectRootTasks.length ? projectRootTasks.map((task) => renderTask(task)) : <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">No tasks in this project yet.</p>}</div></section>; })}{projects.length === 0 && <p className="rounded-lg bg-white p-6 text-center text-slate-500">No projects available.</p>}</div>
+              <div className="mt-5 overflow-x-auto rounded-xl border border-slate-200 bg-white">
+                <table className="min-w-[1180px] w-full text-left text-sm">
+                  <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                    <tr>
+                      <th className="px-3 py-3">Task / Subtask</th>
+                      <th className="px-3 py-3">Status</th>
+                      <th className="px-3 py-3">Priority</th>
+                      <th className="px-3 py-3">Progress</th>
+                      <th className="px-3 py-3">Due</th>
+                      <th className="px-3 py-3">Assigned to</th>
+                      <th className="px-3 py-3">Assigned by</th>
+                      <th className="px-3 py-3">Created</th>
+                      <th className="px-3 py-3">Actions</th>
+                    </tr>
+                  </thead>
+                  {projects.map((project) => {
+                    const projectRootTasks = sortTasksAscending(rootTasks.filter((task) => task.projectId === project.id));
+                    const projectTaskCount = visibleTasks.filter((task) => task.projectId === project.id).length;
+                    return (
+                      <tbody key={project.id}>
+                        <tr className="border-t border-slate-200 bg-indigo-50/60">
+                          <td colSpan={9} className="px-3 py-3">
+                            <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                              <span className="font-bold text-indigo-900">Project: {project.name}</span>
+                              <span className="text-xs text-indigo-700">{projectTaskCount} items · sorted oldest first</span>
+                            </div>
+                            <p className="mt-1 text-xs text-slate-500">{project.description}</p>
+                          </td>
+                        </tr>
+                        {projectRootTasks.length ? projectRootTasks.flatMap((task) => renderTaskRow(task)) : (
+                          <tr>
+                            <td colSpan={9} className="px-3 py-5 text-center text-sm text-slate-500">No tasks in this project yet.</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    );
+                  })}
+                  {projects.length === 0 && (
+                    <tbody><tr><td colSpan={9} className="px-3 py-6 text-center text-slate-500">No projects available.</td></tr></tbody>
+                  )}
+                </table>
+              </div>
             </div>
 
             <p className="mt-6 text-center text-xs text-slate-400">Demo mode: data is stored in this browser. Production authentication and database persistence should be added before real users are invited.</p>
