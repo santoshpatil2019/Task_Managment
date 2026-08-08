@@ -1014,7 +1014,14 @@ export default function Home() {
             <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
               <div>
                 <p className="text-sm text-slate-500">Monday, August 9</p>
-                <h2 className="mt-1 text-3xl font-bold">Good morning, {currentUser.name.split(" ")[0]} 👋</h2>
+                <h2 className="mt-1 flex flex-wrap items-center gap-3 text-3xl font-bold">
+                  Good morning, {currentUser.name.split(" ")[0]}
+                  <img
+                    src="/honey-badger.gif"
+                    alt="Honey badger"
+                    className="h-10 w-10 rounded-xl object-cover shadow-sm"
+                  />
+                </h2>
                 <p className="mt-2 text-slate-500">Manage work based on your role and responsibilities.</p>
               </div>
               <div className="flex flex-wrap gap-2">
