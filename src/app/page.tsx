@@ -331,10 +331,14 @@ export default function Home() {
     markMessagesRead(note.taskId);
   };
 
-  const sortTasksAscending = (items: Task[]) =>
+  const sortTasksNewestFirst = (items: Task[]) =>
     [...items].sort((first, second) => {
-      const timeDifference = (first.createdAt ?? "").localeCompare(second.createdAt ?? "");
-      return timeDifference || first.title.localeCompare(second.title);
+      const firstTime = Date.parse(first.createdAt ?? "");
+      const secondTime = Date.parse(second.createdAt ?? "");
+      if (Number.isNaN(firstTime) || Number.isNaN(secondTime)) {
+        return (second.createdAt ?? "").localeCompare(first.createdAt ?? "") || first.title.localeCompare(second.title);
+      }
+      return secondTime - firstTime || first.title.localeCompare(second.title);
     });
 
   const sortNotesNewestFirst = (items: Note[]) =>
@@ -547,7 +551,7 @@ export default function Home() {
   };
 
   const renderTask = (task: Task, depth = 0): React.ReactNode => {
-    const children = visibleTasks.filter((child) => child.parentId === task.id);
+    const children = sortTasksNewestFirst(visibleTasks.filter((child) => child.parentId === task.id));
     const canEditTask = currentUser?.role === "Employee" && task.assigneeId === currentUser.id;
     const edit = canEditTask ? getEmployeeEdit(task) : null;
     const taskNotes = notes.filter((note) => note.taskId === task.id);
@@ -673,7 +677,7 @@ export default function Home() {
   };
 
   const renderTaskRow = (task: Task, depth = 0): React.ReactNode[] => {
-    const children = sortTasksAscending(
+    const children = sortTasksNewestFirst(
       visibleTasks.filter((child) => child.parentId === task.id),
     );
     const taskNotes = sortNotesNewestFirst(notes.filter((note) => note.taskId === task.id));
@@ -1141,7 +1145,7 @@ export default function Home() {
                     </tr>
                   </thead>
                   {projects.map((project) => {
-                    const projectRootTasks = sortTasksAscending(rootTasks.filter((task) => task.projectId === project.id));
+                    const projectRootTasks = sortTasksNewestFirst(rootTasks.filter((task) => task.projectId === project.id));
                     const projectTaskCount = visibleTasks.filter((task) => task.projectId === project.id).length;
                     return (
                       <tbody key={project.id}>
@@ -1149,7 +1153,7 @@ export default function Home() {
                           <td colSpan={12} className="px-3 py-3">
                             <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
                               <span className="font-bold text-indigo-900">Project: {project.name}</span>
-                              <span className="text-xs text-indigo-700">{projectTaskCount} items · sorted oldest first</span>
+                              <span className="text-xs text-indigo-700">{projectTaskCount} items · sorted newest first</span>
                             </div>
                             <p className="mt-1 text-xs text-slate-500">{project.description}</p>
                           </td>
