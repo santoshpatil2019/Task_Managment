@@ -2,6 +2,7 @@
 
 import { Fragment, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
+import { isSupabaseConfigured, supabase } from "@/lib/supabase/browser";
 
 type Role = "Admin" | "Manager" | "Employee";
 type TaskStatus = "Not started" | "In progress" | "Blocked" | "Complete";
@@ -11,7 +12,6 @@ type User = {
   id: string;
   name: string;
   email: string;
-  password: string;
   role: Role;
   active: boolean;
 };
@@ -59,9 +59,6 @@ type ProgressLog = {
   createdAt: string;
 };
 
-const STORAGE_KEY = "task-management-role-data-v1";
-const SESSION_KEY = "task-management-current-user";
-
 const formatReportDateInput = (date: Date) => {
   const day = String(date.getDate()).padStart(2, "0");
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -88,168 +85,6 @@ const parseReportDateInput = (value: string, endOfDay = false) => {
     : null;
 };
 
-const demoUsers: User[] = [
-  {
-    id: "user-admin",
-    name: "Asha Admin",
-    email: "admin@task.local",
-    password: "admin123",
-    role: "Admin",
-    active: true,
-  },
-  {
-    id: "user-manager",
-    name: "Rahul Manager",
-    email: "manager@task.local",
-    password: "manager123",
-    role: "Manager",
-    active: true,
-  },
-  {
-    id: "user-employee",
-    name: "Priya Employee",
-    email: "employee@task.local",
-    password: "employee123",
-    role: "Employee",
-    active: true,
-  },
-];
-
-const demoProjects: Project[] = [
-  {
-    id: "project-website",
-    name: "Website redesign",
-    description: "Plan and deliver the new website experience.",
-  },
-  {
-    id: "project-product",
-    name: "Product planning",
-    description: "Organize upcoming product work and requirements.",
-  },
-];
-
-const demoTasks: Task[] = [
-  {
-    id: "task-kickoff",
-    title: "Prepare project kickoff",
-    projectId: "project-website",
-    description: "Prepare the agenda, milestones, and kickoff notes.",
-    due: "Today",
-    priority: "High",
-    status: "In progress",
-    progress: 40,
-    assigneeId: "user-employee",
-    createdById: "user-manager",
-    parentId: null,
-    createdAt: "2026-08-07T09:00:00.000Z",
-    assignedAt: "2026-08-07T09:00:00.000Z",
-    dueDate: "2026-08-12",
-  },
-  {
-    id: "task-requirements",
-    title: "Review task requirements",
-    projectId: "project-product",
-    description: "Review the acceptance criteria and identify open questions.",
-    due: "Tomorrow",
-    priority: "Medium",
-    status: "Not started",
-    progress: 0,
-    assigneeId: "user-employee",
-    createdById: "user-manager",
-    parentId: null,
-    createdAt: "2026-08-08T09:30:00.000Z",
-    assignedAt: "2026-08-08T09:30:00.000Z",
-    dueDate: "2026-08-14",
-  },
-  {
-    id: "task-docs",
-    title: "Update documentation",
-    projectId: "project-website",
-    description: "Refresh the internal documentation for the project.",
-    due: "Friday",
-    priority: "Low",
-    status: "Complete",
-    progress: 100,
-    assigneeId: "user-employee",
-    createdById: "user-manager",
-    parentId: null,
-    createdAt: "2026-08-05T10:00:00.000Z",
-    assignedAt: "2026-08-05T10:00:00.000Z",
-    dueDate: "2026-08-09",
-    completedAt: "2026-08-08T16:30:00.000Z",
-  },
-];
-
-const demoProgressLogs: ProgressLog[] = [
-  {
-    id: "progress-kickoff-1",
-    taskId: "task-kickoff",
-    employeeId: "user-employee",
-    description: "Kickoff agenda drafted and milestones reviewed.",
-    status: "In progress",
-    progress: 20,
-    createdAt: "2026-08-07T09:00:00.000Z",
-  },
-  {
-    id: "progress-kickoff-2",
-    taskId: "task-kickoff",
-    employeeId: "user-employee",
-    description: "Prepare the agenda, milestones, and kickoff notes.",
-    status: "In progress",
-    progress: 40,
-    createdAt: "2026-08-09T09:00:00.000Z",
-  },
-  {
-    id: "progress-requirements-1",
-    taskId: "task-requirements",
-    employeeId: "user-employee",
-    description: "Acceptance criteria review is scheduled.",
-    status: "Not started",
-    progress: 0,
-    createdAt: "2026-08-09T08:30:00.000Z",
-  },
-  {
-    id: "progress-docs-1",
-    taskId: "task-docs",
-    employeeId: "user-employee",
-    description: "Documentation refresh completed.",
-    status: "Complete",
-    progress: 100,
-    createdAt: "2026-08-08T16:30:00.000Z",
-  },
-];
-
-const makeId = (prefix: string) =>
-  `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-
-const getLegacyDueDate = (due?: string) => {
-  if (!due || /^\d{4}-\d{2}-\d{2}$/.test(due)) return due;
-  const date = new Date();
-  date.setHours(0, 0, 0, 0);
-  if (due === "Tomorrow") date.setDate(date.getDate() + 1);
-  else if (due !== "Today") {
-    const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-    const targetDay = days.indexOf(due);
-    if (targetDay < 0) return undefined;
-    date.setDate(date.getDate() + ((targetDay - date.getDay() + 7) % 7 || 7));
-  }
-  return date.toISOString().slice(0, 10);
-};
-
-const normalizeTaskDates = (items: Task[], progressLogs: ProgressLog[] = []) =>
-  items.map((task, index) => {
-    const assignedAt = task.assignedAt ?? task.createdAt ?? new Date(Date.now() - (index + 1) * 24 * 60 * 60 * 1000).toISOString();
-    const completionLog = progressLogs
-      .filter((log) => log.taskId === task.id && log.status === "Complete")
-      .sort((first, second) => second.createdAt.localeCompare(first.createdAt))[0];
-    return {
-      ...task,
-      assignedAt,
-      dueDate: task.dueDate ?? getLegacyDueDate(task.due),
-      completedAt: task.completedAt ?? (task.status === "Complete" ? task.createdAt ?? completionLog?.createdAt : undefined),
-    };
-  });
-
 export default function Home() {
   const [users, setUsers] = useState<User[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -257,17 +92,18 @@ export default function Home() {
   const [notes, setNotes] = useState<Note[]>([]);
   const [progressLogs, setProgressLogs] = useState<ProgressLog[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [hydrated, setHydrated] = useState(false);
+  const [hydrated, setHydrated] = useState(() => !isSupabaseConfigured);
+  const [now, setNow] = useState(() => Date.now());
   const [modal, setModal] = useState<Modal>(null);
   const [notice, setNotice] = useState("");
 
-  const [loginEmail, setLoginEmail] = useState("admin@task.local");
-  const [loginPassword, setLoginPassword] = useState("admin123");
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
   const [loginError, setLoginError] = useState("");
 
   const [newUserName, setNewUserName] = useState("");
   const [newUserEmail, setNewUserEmail] = useState("");
-  const [newUserPassword, setNewUserPassword] = useState("welcome123");
+  const [newUserPassword, setNewUserPassword] = useState("");
   const [newUserRole, setNewUserRole] = useState<Role>("Employee");
 
   const [newProjectName, setNewProjectName] = useState("");
@@ -300,61 +136,70 @@ export default function Home() {
     Record<string, { description: string; status: TaskStatus; progress: number }>
   >({});
 
+  const apiRequest = async (action: string, payload: Record<string, unknown> = {}) => {
+    const response = await fetch("/api/workspace", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, ...payload }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error ?? "The request could not be completed.");
+    return result;
+  };
+
+  const loadWorkspace = async () => {
+    const response = await fetch("/api/workspace", { cache: "no-store" });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error ?? "Unable to load workspace.");
+    setUsers(data.users ?? []);
+    setProjects(data.projects ?? []);
+    setTasks(data.tasks ?? []);
+    setNotes(data.notes ?? []);
+    setProgressLogs(data.progressLogs ?? []);
+    setCurrentUserId(data.currentUser?.id ?? null);
+    setProfileName(data.currentUser?.name ?? "");
+  };
+
   useEffect(() => {
-    const saved = window.localStorage.getItem(STORAGE_KEY);
-    const session = window.localStorage.getItem(SESSION_KEY);
-
-    if (saved) {
-      try {
-        const data = JSON.parse(saved);
-        setUsers(data.users ?? demoUsers);
-        setProjects(data.projects ?? demoProjects);
-        setTasks(normalizeTaskDates(data.tasks ?? demoTasks, data.progressLogs ?? demoProgressLogs));
-        setNotes(data.notes ?? []);
-        setProgressLogs(data.progressLogs ?? demoProgressLogs);
-      } catch {
-        setUsers(demoUsers);
-        setProjects(demoProjects);
-        setTasks(normalizeTaskDates(demoTasks, demoProgressLogs));
-        setNotes([]);
-        setProgressLogs(demoProgressLogs);
-      }
-    } else {
-      setUsers(demoUsers);
-      setProjects(demoProjects);
-      setTasks(normalizeTaskDates(demoTasks, demoProgressLogs));
-      setNotes([]);
-      setProgressLogs(demoProgressLogs);
+    const client = supabase;
+    if (!isSupabaseConfigured || !client) {
+      return;
     }
-
-    setCurrentUserId(session);
-    setHydrated(true);
+    let active = true;
+    const bootstrap = async () => {
+      try {
+        const { data: { session } } = await client.auth.getSession();
+        if (session && active) await loadWorkspace();
+      } catch (error) {
+        if (active) setNotice(error instanceof Error ? error.message : "Unable to load workspace.");
+      } finally {
+        if (active) setHydrated(true);
+      }
+    };
+    void bootstrap();
+    const { data: authListener } = client.auth.onAuthStateChange((event) => {
+      if (event === "SIGNED_OUT") {
+        setCurrentUserId(null);
+        setUsers([]);
+        setProjects([]);
+        setTasks([]);
+        setNotes([]);
+        setProgressLogs([]);
+      }
+    });
+    return () => {
+      active = false;
+      authListener.subscription.unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
-    if (!hydrated) return;
-
-    window.localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({ users, projects, tasks, notes, progressLogs }),
-    );
-
-    if (currentUserId) {
-      window.localStorage.setItem(SESSION_KEY, currentUserId);
-    } else {
-      window.localStorage.removeItem(SESSION_KEY);
-    }
-  }, [currentUserId, hydrated, notes, progressLogs, projects, tasks, users]);
+    const timer = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const currentUser = users.find((user) => user.id === currentUserId) ?? null;
   const employees = users.filter((user) => user.role === "Employee" && user.active);
-  useEffect(() => {
-    if (currentUser) {
-      setProfileName(currentUser.name);
-      setProfilePassword("");
-      setProfilePasswordConfirm("");
-    }
-  }, [currentUserId]);
   const visibleTasks = useMemo(() => {
     if (!currentUser || currentUser.role !== "Employee") return tasks;
 
@@ -425,7 +270,7 @@ export default function Home() {
   const getTaskDaysFromAssignment = (task: Task) => {
     const assignedAt = Date.parse(getAssignedAt(task) ?? "");
     if (Number.isNaN(assignedAt)) return "Not recorded";
-    const endAt = task.completedAt ? Date.parse(task.completedAt) : Date.now();
+    const endAt = task.completedAt ? Date.parse(task.completedAt) : now;
     if (Number.isNaN(endAt)) return "Not recorded";
     return `${Math.max(0, Math.ceil((endAt - assignedAt) / (24 * 60 * 60 * 1000)))} days`;
   };
@@ -434,7 +279,7 @@ export default function Home() {
     if (!currentUser || note.authorId === currentUser.id) return false;
     if (note.readBy?.includes(currentUser.id)) return false;
     const createdAt = Date.parse(note.createdAt);
-    return !Number.isNaN(createdAt) && Date.now() - createdAt < 24 * 60 * 60 * 1000;
+    return !Number.isNaN(createdAt) && now - createdAt < 24 * 60 * 60 * 1000;
   };
 
   const markMessagesRead = (taskId: string) => {
@@ -442,6 +287,9 @@ export default function Home() {
     setNotes((current) => current.map((note) => note.taskId === taskId
       ? { ...note, readBy: Array.from(new Set([...(note.readBy ?? []), currentUser.id])) }
       : note));
+    void apiRequest("mark_messages_read", { taskId }).catch((error) => {
+      setNotice(error instanceof Error ? error.message : "Unable to update message status.");
+    });
   };
 
   const toggleMessages = (taskId: string) => {
@@ -490,65 +338,56 @@ export default function Home() {
     });
   };
 
-  const login = (event: FormEvent<HTMLFormElement>) => {
+  const login = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const user = users.find(
-      (candidate) =>
-        candidate.email.toLowerCase() === loginEmail.toLowerCase() &&
-        candidate.password === loginPassword &&
-        candidate.active,
-    );
-
-    if (!user) {
+    if (!supabase) {
+      setLoginError("Production authentication is not configured yet.");
+      return;
+    }
+    const { error } = await supabase.auth.signInWithPassword({ email: loginEmail.trim(), password: loginPassword });
+    if (error) {
       setLoginError("Invalid credentials or inactive user.");
       return;
     }
-
-    setLoginError("");
-    setCurrentUserId(user.id);
+    try {
+      await loadWorkspace();
+      setLoginError("");
+    } catch (error) {
+      await supabase.auth.signOut();
+      setLoginError(error instanceof Error ? error.message : "Unable to load workspace.");
+    }
   };
 
-  const createUser = (event: FormEvent<HTMLFormElement>) => {
+  const createUser = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!newUserName.trim() || !newUserEmail.trim() || !newUserPassword.trim()) return;
-
-    const alreadyExists = users.some(
-      (user) => user.email.toLowerCase() === newUserEmail.trim().toLowerCase(),
-    );
-    if (alreadyExists) {
-      setNotice("A user with that email already exists.");
-      return;
+    try {
+      await apiRequest("create_user", { name: newUserName, email: newUserEmail, password: newUserPassword, role: newUserRole });
+      await loadWorkspace();
+      setNewUserName("");
+      setNewUserEmail("");
+      setNewUserPassword("");
+      setNewUserRole("Employee");
+      setModal(null);
+      setNotice("User created successfully.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Unable to create user.");
     }
-
-    setUsers((current) => [
-      {
-        id: makeId("user"),
-        name: newUserName.trim(),
-        email: newUserEmail.trim().toLowerCase(),
-        password: newUserPassword,
-        role: newUserRole,
-        active: true,
-      },
-      ...current,
-    ]);
-    setNewUserName("");
-    setNewUserEmail("");
-    setNewUserPassword("welcome123");
-    setNewUserRole("Employee");
-    setModal(null);
-    setNotice("User created successfully.");
   };
 
-  const updateUserRole = (userId: string, role: Role) => {
-    setUsers((current) =>
-      current.map((user) => (user.id === userId ? { ...user, role } : user)),
-    );
-    setNotice("User role updated.");
+  const updateUserRole = async (userId: string, role: Role) => {
+    try {
+      await apiRequest("update_user", { userId, role });
+      await loadWorkspace();
+      setNotice("User role updated.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Unable to update user role.");
+    }
   };
 
-  const updateOwnProfile = (event: FormEvent<HTMLFormElement>) => {
+  const updateOwnProfile = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!currentUser) return;
+    if (!currentUser || !supabase) return;
     const nextName = profileName.trim();
     if (!nextName) {
       setNotice("Your name cannot be empty.");
@@ -563,41 +402,49 @@ export default function Home() {
       return;
     }
 
-    setUsers((current) => current.map((user) => user.id === currentUser.id
-      ? { ...user, name: nextName, ...(profilePassword ? { password: profilePassword } : {}) }
-      : user));
-    setProfilePassword("");
-    setProfilePasswordConfirm("");
-    setNotice(profilePassword ? "Name and password updated." : "Name updated.");
+    try {
+      if (profilePassword) {
+        const { error } = await supabase.auth.updateUser({ password: profilePassword });
+        if (error) throw error;
+      }
+      await apiRequest("update_profile", { name: nextName });
+      await loadWorkspace();
+      setProfilePassword("");
+      setProfilePasswordConfirm("");
+      setNotice(profilePassword ? "Name and password updated." : "Name updated.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Unable to update profile.");
+    }
   };
 
-  const toggleUser = (userId: string) => {
-    setUsers((current) =>
-      current.map((user) =>
-        user.id === userId ? { ...user, active: !user.active } : user,
-      ),
-    );
+  const toggleUser = async (userId: string) => {
+    const user = users.find((item) => item.id === userId);
+    if (!user) return;
+    try {
+      await apiRequest("update_user", { userId, active: !user.active });
+      await loadWorkspace();
+      setNotice(user.active ? "User deactivated." : "User activated.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Unable to update user status.");
+    }
   };
 
-  const createProject = (event: FormEvent<HTMLFormElement>) => {
+  const createProject = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!newProjectName.trim()) return;
-
-    setProjects((current) => [
-      {
-        id: makeId("project"),
-        name: newProjectName.trim(),
-        description: newProjectDescription.trim() || "A new project for your team.",
-      },
-      ...current,
-    ]);
-    setNewProjectName("");
-    setNewProjectDescription("");
-    setModal(null);
-    setNotice("Project created successfully.");
+    try {
+      await apiRequest("create_project", { name: newProjectName, description: newProjectDescription });
+      await loadWorkspace();
+      setNewProjectName("");
+      setNewProjectDescription("");
+      setModal(null);
+      setNotice("Project created successfully.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Unable to create project.");
+    }
   };
 
-  const createTask = (event: FormEvent<HTMLFormElement>) => {
+  const createTask = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!currentUser || currentUser.role !== "Manager" || !newTaskTitle.trim()) return;
 
@@ -611,52 +458,33 @@ export default function Home() {
     const parentTask = tasks.find((task) => task.id === newTaskParentId);
     const parentId = parentTask?.projectId === projectId ? parentTask.id : null;
 
-    const assignedAt = new Date().toISOString();
-    setTasks((current) => [
-      {
-        id: makeId("task"),
-        title: newTaskTitle.trim(),
-        projectId,
-        description: newTaskDescription.trim() || "No description yet.",
-        due: newTaskDue,
-        priority: newTaskPriority,
-        status: "Not started",
-        progress: 0,
-        assigneeId,
-        createdById: currentUser.id,
-        parentId,
-        createdAt: assignedAt,
-        assignedAt,
-        dueDate: newTaskDue,
-      },
-      ...current,
-    ]);
-    setNewTaskTitle("");
-    setNewTaskDescription("");
-    setNewTaskParentId("");
-    setModal(null);
-    setNotice("Task created and assigned.");
+    try {
+      await apiRequest("create_task", { title: newTaskTitle, description: newTaskDescription, projectId, assigneeId, parentId, priority: newTaskPriority, dueDate: newTaskDue });
+      await loadWorkspace();
+      setNewTaskTitle("");
+      setNewTaskDescription("");
+      setNewTaskParentId("");
+      setModal(null);
+      setNotice("Task created and assigned.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Unable to create task.");
+    }
   };
 
-  const addNote = (taskId: string) => {
+  const addNote = async (taskId: string) => {
     const task = tasks.find((item) => item.id === taskId);
     const canAddNote = currentUser?.role === "Manager" ||
       (currentUser?.role === "Employee" && task?.assigneeId === currentUser.id);
     if (!currentUser || !canAddNote || !noteText.trim()) return;
-    setNotes((current) => [
-      {
-        id: makeId("note"),
-        taskId,
-        text: noteText.trim(),
-        authorId: currentUser.id,
-        createdAt: new Date().toISOString(),
-        readBy: [currentUser.id],
-      },
-      ...current,
-    ]);
-    setNoteTaskId(null);
-    setNoteText("");
-    setNotice("Message sent.");
+    try {
+      await apiRequest("add_note", { taskId, text: noteText });
+      await loadWorkspace();
+      setNoteTaskId(null);
+      setNoteText("");
+      setNotice("Message sent.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Unable to send message.");
+    }
   };
 
   const getEmployeeEdit = (task: Task) =>
@@ -676,36 +504,17 @@ export default function Home() {
     }));
   };
 
-  const saveEmployeeUpdate = (task: Task) => {
+  const saveEmployeeUpdate = async (task: Task) => {
     if (!currentUser || currentUser.role !== "Employee") return;
     const edit = getEmployeeEdit(task);
-    const createdAt = new Date().toISOString();
     const progress = Math.min(100, Math.max(0, edit.progress));
-    setTasks((current) =>
-      current.map((item) =>
-        item.id === task.id
-          ? {
-              ...item,
-              ...edit,
-              progress,
-              completedAt: edit.status === "Complete" ? item.completedAt ?? createdAt : undefined,
-            }
-          : item,
-      ),
-    );
-    setProgressLogs((current) => [
-      {
-        id: makeId("progress"),
-        taskId: task.id,
-        employeeId: currentUser.id,
-        description: edit.description,
-        status: edit.status,
-        progress,
-        createdAt,
-      },
-      ...current,
-    ]);
-    setNotice("Daily task update saved.");
+    try {
+      await apiRequest("save_employee_update", { taskId: task.id, description: edit.description, status: edit.status, progress });
+      await loadWorkspace();
+      setNotice("Daily task update saved.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Unable to save daily update.");
+    }
   };
 
   const renderTask = (task: Task, depth = 0): React.ReactNode => {
@@ -997,6 +806,22 @@ export default function Home() {
     return <main className="flex min-h-screen items-center justify-center bg-slate-50 text-slate-500">Loading Task Management...</main>;
   }
 
+  if (!isSupabaseConfigured) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-slate-950 p-6 text-white">
+        <div className="w-full max-w-xl rounded-3xl border border-white/10 bg-white p-8 text-slate-900 shadow-2xl">
+          <div className="flex items-center gap-3">
+            <img src="/mellivo-logo.png" alt="Mellivo logo" className="h-12 w-12 rounded-2xl border border-slate-200 bg-white object-contain p-1" />
+            <div><p className="font-bold tracking-[0.18em]">MELLIVO</p><p className="text-xs font-semibold uppercase tracking-wider text-indigo-600">Task Management</p></div>
+          </div>
+          <h1 className="mt-8 text-2xl font-bold">Production setup required</h1>
+          <p className="mt-3 leading-6 text-slate-600">Connect this deployment to Supabase before inviting real users. Add the public project URL and publishable key as Vercel environment variables, then redeploy.</p>
+          <div className="mt-5 rounded-xl bg-slate-950 p-4 font-mono text-sm text-indigo-100">NEXT_PUBLIC_SUPABASE_URL<br />NEXT_PUBLIC_SUPABASE_ANON_KEY</div>
+        </div>
+      </main>
+    );
+  }
+
   if (!currentUser) {
     return (
       <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-slate-950 p-4 sm:p-8">
@@ -1057,14 +882,6 @@ export default function Home() {
               {loginError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{loginError}</p>}
               <button className="w-full rounded-xl bg-indigo-600 px-4 py-3.5 font-semibold text-white shadow-lg shadow-indigo-200 hover:bg-indigo-700">Sign in to Mellivo</button>
             </form>
-            <div className="mt-8 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Demo access</p>
-              <div className="mt-3 grid gap-2 text-xs text-slate-600 sm:grid-cols-3">
-                <p><b className="text-slate-900">Admin</b><br />admin@task.local<br />admin123</p>
-                <p><b className="text-slate-900">Manager</b><br />manager@task.local<br />manager123</p>
-                <p><b className="text-slate-900">Employee</b><br />employee@task.local<br />employee123</p>
-              </div>
-            </div>
           </div>
         </div>
       </main>
@@ -1150,7 +967,7 @@ export default function Home() {
             ))}
           </nav>
           <button
-            onClick={() => setCurrentUserId(null)}
+            onClick={async () => { await supabase?.auth.signOut(); setCurrentUserId(null); }}
             className="mt-6 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-semibold text-slate-600 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"
           >
             Sign out
@@ -1170,7 +987,7 @@ export default function Home() {
               <p className="mt-1 text-sm text-slate-500">{currentUser.name} · {currentUser.role}</p>
             </div>
             <button
-              onClick={() => setCurrentUserId(null)}
+              onClick={async () => { await supabase?.auth.signOut(); setCurrentUserId(null); }}
               className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 hover:border-indigo-200 hover:text-indigo-700"
             >
               Sign out
@@ -1421,7 +1238,7 @@ export default function Home() {
             </div>
             )}
 
-            <p className="mt-6 text-center text-xs text-slate-400">Demo mode: data is stored in this browser. Production authentication and database persistence should be added before real users are invited.</p>
+            <p className="mt-6 text-center text-xs text-slate-400">Workspace data is protected by Supabase authentication and database policies.</p>
           </div>
         </section>
       </div>
