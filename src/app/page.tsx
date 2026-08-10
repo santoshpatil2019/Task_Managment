@@ -738,7 +738,22 @@ export default function Home() {
             <div>
               <p className="font-semibold text-slate-900">{task.title}</p>
               <p className="mt-1 text-xs font-medium text-violet-700">{task.parentId ? "Subtask" : "Task"}</p>
-              <p className="mt-1 max-w-sm whitespace-normal text-xs text-slate-500">{task.description}</p>
+              <div className="group relative mt-1 w-fit max-w-full">
+                <button
+                  type="button"
+                  aria-describedby={`task-description-${task.id}`}
+                  className="max-w-sm truncate text-left text-xs font-semibold text-indigo-600 underline decoration-dotted underline-offset-2 hover:text-indigo-800 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                >
+                  View description
+                </button>
+                <div
+                  id={`task-description-${task.id}`}
+                  role="tooltip"
+                  className="pointer-events-none invisible absolute left-0 top-full z-40 mt-2 w-72 max-w-[calc(100vw-2rem)] rounded-xl border border-indigo-200 bg-slate-950 p-3 text-left text-xs leading-5 text-white opacity-0 shadow-xl transition-opacity group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100"
+                >
+                  {task.description || "No description yet."}
+                </div>
+              </div>
             </div>
           </div>
         </td>
