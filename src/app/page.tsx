@@ -60,6 +60,8 @@ type ProgressLog = {
   createdAt: string;
 };
 
+const ARCHIVE_PAGE_SIZE = 10;
+
 const formatReportDateInput = (date: Date) => {
   const day = String(date.getDate()).padStart(2, "0");
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -91,6 +93,8 @@ export default function Home() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [archivedTasks, setArchivedTasks] = useState<Task[]>([]);
+  const [archivePage, setArchivePage] = useState(1);
+  const [archiveCollapsed, setArchiveCollapsed] = useState(false);
   const [notes, setNotes] = useState<Note[]>([]);
   const [progressLogs, setProgressLogs] = useState<ProgressLog[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -731,9 +735,9 @@ export default function Home() {
     const hasNewMessages = taskNotes.some(isNewMessage);
     const edit = canEditTask ? getEmployeeEdit(task) : null;
     const rows: React.ReactNode[] = [
-      <tr key={task.id} className="border-t border-slate-200 align-top hover:bg-slate-50">
+      <tr key={task.id} className="border-t border-slate-200 align-middle hover:bg-slate-50">
         <td className="px-3 py-4" style={{ paddingLeft: `${12 + depth * 24}px` }}>
-          <div className="flex min-w-0 items-start justify-center gap-2 text-center">
+          <div className="flex min-w-0 items-center justify-center gap-2 text-center">
             {depth > 0 && <span className="pt-0.5 text-indigo-400">↳</span>}
             <div>
               <p className="font-semibold text-slate-900">{task.title}</p>
@@ -914,7 +918,6 @@ export default function Home() {
   };
 
   const renderArchivedTask = (task: Task, depth = 0): React.ReactNode => {
-    const children = sortTasksNewestFirst(archivedTasks.filter((child) => child.parentId === task.id));
     return (
       <div key={task.id} className={depth ? "ml-6 border-l-2 border-amber-200 pl-4" : ""}>
         <div className="rounded-xl border border-amber-200 bg-amber-50/50 p-4">
@@ -932,10 +935,24 @@ export default function Home() {
             <span>Archived: {formatTimestamp(task.archivedAt)}</span>
           </div>
         </div>
-        {children.length > 0 && <div className="mt-3 space-y-3">{children.map((child) => renderArchivedTask(child, depth + 1))}</div>}
       </div>
     );
   };
+
+  const archivedTaskRows: Array<{ task: Task; depth: number }> = [];
+  const appendArchivedTaskRows = (task: Task, depth: number) => {
+    archivedTaskRows.push({ task, depth });
+    sortTasksNewestFirst(archivedTasks.filter((child) => child.parentId === task.id))
+      .forEach((child) => appendArchivedTaskRows(child, depth + 1));
+  };
+  sortTasksNewestFirst(archivedTasks.filter((task) => !task.parentId))
+    .forEach((task) => appendArchivedTaskRows(task, 0));
+  const archivePageCount = Math.max(1, Math.ceil(archivedTaskRows.length / ARCHIVE_PAGE_SIZE));
+  const safeArchivePage = Math.min(archivePage, archivePageCount);
+  const archivePageRows = archivedTaskRows.slice(
+    (safeArchivePage - 1) * ARCHIVE_PAGE_SIZE,
+    safeArchivePage * ARCHIVE_PAGE_SIZE,
+  );
 
   if (!hydrated) {
     return <main className="flex min-h-screen items-center justify-center bg-slate-50 text-slate-500">Loading Task Management...</main>;
@@ -1274,14 +1291,45 @@ export default function Home() {
                   <h3 className="text-xl font-bold">Archive <span className="text-base font-medium text-slate-400">({archivedTasks.length})</span></h3>
                   <p className="mt-1 text-sm text-slate-500">Completed tasks removed from the team board, with their subtask hierarchy preserved.</p>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setArchiveCollapsed((collapsed) => !collapsed)}
+                  aria-expanded={!archiveCollapsed}
+                  className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-indigo-700 hover:border-indigo-200 hover:bg-indigo-50"
+                >
+                  {archiveCollapsed ? "Maximize" : "Minimize"}
+                </button>
               </div>
-              {archivedTasks.length > 0 ? (
-                <div className="mt-5 space-y-3">
-                  {sortTasksNewestFirst(archivedTasks.filter((task) => !task.parentId)).map((task) => renderArchivedTask(task))}
-                </div>
+              {!archiveCollapsed && (archivedTasks.length > 0 ? (
+                <>
+                  <div className="mt-5 space-y-3">
+                    {archivePageRows.map(({ task, depth }) => renderArchivedTask(task, depth))}
+                  </div>
+                  <div className="mt-5 flex flex-col gap-3 border-t border-slate-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-xs font-medium text-slate-500">Page {safeArchivePage} of {archivePageCount} · showing up to {ARCHIVE_PAGE_SIZE} tasks/subtasks</p>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setArchivePage((page) => Math.max(1, page - 1))}
+                        disabled={safeArchivePage === 1}
+                        className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 hover:border-indigo-200 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        Previous
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setArchivePage((page) => Math.min(archivePageCount, page + 1))}
+                        disabled={safeArchivePage === archivePageCount}
+                        className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 hover:border-indigo-200 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </div>
+                </>
               ) : (
                 <p className="mt-5 rounded-lg border border-dashed border-slate-200 p-6 text-center text-sm text-slate-500">No archived tasks yet.</p>
-              )}
+              ))}
             </div>
 
             {currentUser.role !== "Employee" && (
