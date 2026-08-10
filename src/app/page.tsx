@@ -331,10 +331,18 @@ export default function Home() {
     markMessagesRead(note.taskId);
   };
 
-  const sortTasksNewestFirst = (items: Task[]) =>
+  const latestTaskCreatedTime = (task: Task, allTasks: Task[]): number => {
+    const ownTime = Date.parse(task.createdAt ?? "");
+    const childTimes = allTasks
+      .filter((child) => child.parentId === task.id)
+      .map((child) => latestTaskCreatedTime(child, allTasks));
+    return Math.max(Number.isNaN(ownTime) ? Number.NEGATIVE_INFINITY : ownTime, ...childTimes);
+  };
+
+  const sortTasksNewestFirst = (items: Task[], considerSubtasks = false) =>
     [...items].sort((first, second) => {
-      const firstTime = Date.parse(first.createdAt ?? "");
-      const secondTime = Date.parse(second.createdAt ?? "");
+      const firstTime = considerSubtasks ? latestTaskCreatedTime(first, visibleTasks) : Date.parse(first.createdAt ?? "");
+      const secondTime = considerSubtasks ? latestTaskCreatedTime(second, visibleTasks) : Date.parse(second.createdAt ?? "");
       if (Number.isNaN(firstTime) || Number.isNaN(secondTime)) {
         return (second.createdAt ?? "").localeCompare(first.createdAt ?? "") || first.title.localeCompare(second.title);
       }
@@ -1145,7 +1153,7 @@ export default function Home() {
                     </tr>
                   </thead>
                   {projects.map((project) => {
-                    const projectRootTasks = sortTasksNewestFirst(rootTasks.filter((task) => task.projectId === project.id));
+                    const projectRootTasks = sortTasksNewestFirst(rootTasks.filter((task) => task.projectId === project.id), true);
                     const projectTaskCount = visibleTasks.filter((task) => task.projectId === project.id).length;
                     return (
                       <tbody key={project.id}>
@@ -1153,7 +1161,7 @@ export default function Home() {
                           <td colSpan={12} className="px-3 py-3">
                             <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
                               <span className="font-bold text-indigo-900">Project: {project.name}</span>
-                              <span className="text-xs text-indigo-700">{projectTaskCount} items · sorted newest first</span>
+                              <span className="text-xs text-indigo-700">{projectTaskCount} items · newest task or subtask first</span>
                             </div>
                             <p className="mt-1 text-xs text-slate-500">{project.description}</p>
                           </td>
