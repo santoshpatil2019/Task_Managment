@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase/browser";
 
@@ -147,7 +147,7 @@ export default function Home() {
     return result;
   };
 
-  const loadWorkspace = async () => {
+  const loadWorkspace = useCallback(async () => {
     const response = await fetch("/api/workspace", { cache: "no-store" });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error ?? "Unable to load workspace.");
@@ -158,7 +158,7 @@ export default function Home() {
     setProgressLogs(data.progressLogs ?? []);
     setCurrentUserId(data.currentUser?.id ?? null);
     setProfileName(data.currentUser?.name ?? "");
-  };
+  }, []);
 
   useEffect(() => {
     const client = supabase;
@@ -191,7 +191,38 @@ export default function Home() {
       active = false;
       authListener.subscription.unsubscribe();
     };
-  }, []);
+  }, [loadWorkspace]);
+
+  useEffect(() => {
+    const client = supabase;
+    if (!currentUserId || !client) return;
+    let refreshing = false;
+    const refresh = async () => {
+      if (refreshing) return;
+      refreshing = true;
+      try {
+        await loadWorkspace();
+      } catch (error) {
+        setNotice(error instanceof Error ? error.message : "Unable to refresh workspace.");
+      } finally {
+        refreshing = false;
+      }
+    };
+    const interval = window.setInterval(() => { void refresh(); }, 5000);
+    window.addEventListener("focus", refresh);
+    const channel = client
+      .channel(`workspace-updates-${currentUserId}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, refresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "progress_logs" }, refresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "notes" }, refresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "projects" }, refresh)
+      .subscribe();
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refresh);
+      void client.removeChannel(channel);
+    };
+  }, [currentUserId, loadWorkspace]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 60_000);
