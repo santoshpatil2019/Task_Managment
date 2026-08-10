@@ -32,7 +32,8 @@ create table public.tasks (
   created_at timestamptz not null default now(),
   assigned_at timestamptz not null default now(),
   due_date date,
-  completed_at timestamptz
+  completed_at timestamptz,
+  archived_at timestamptz
 );
 
 create table public.notes (
@@ -138,6 +139,7 @@ begin
     new.created_at := old.created_at;
     new.assigned_at := old.assigned_at;
     new.due_date := old.due_date;
+    new.archived_at := old.archived_at;
   end if;
   return new;
 end;

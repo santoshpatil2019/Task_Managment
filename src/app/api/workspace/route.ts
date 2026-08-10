@@ -17,6 +17,7 @@ const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("add_note"), taskId: z.string().min(1), text: z.string().trim().min(1).max(5000) }),
   z.object({ action: z.literal("mark_messages_read"), taskId: z.string().min(1) }),
   z.object({ action: z.literal("save_employee_update"), taskId: z.string().min(1), description: z.string().trim().max(5000), status: statusSchema, progress: z.number().int().min(0).max(100) }),
+  z.object({ action: z.literal("archive_task"), taskId: z.string().min(1) }),
 ]);
 
 type ProfileRow = { id: string; name: string; role: "Admin" | "Manager" | "Employee"; active: boolean };
@@ -26,6 +27,10 @@ function taskStatusFromRow(value: unknown): TaskStatus {
   if (value === "Completed" || value === "Complete") return "Completed";
   if (value === "In progress") return "In progress";
   return "Not started";
+}
+
+function isCompletedStatus(value: unknown) {
+  return value === "Completed" || value === "Complete";
 }
 
 function isLegacyStatusError(error: { message?: string } | null) {
@@ -39,7 +44,7 @@ function projectFromRow(project: Record<string, unknown>) {
   return { id: project.id, name: project.name, description: project.description };
 }
 function taskFromRow(task: Record<string, unknown>) {
-  return { id: task.id, title: task.title, projectId: task.project_id, description: task.description, due: task.due, priority: task.priority, status: taskStatusFromRow(task.status), progress: task.progress, assigneeId: task.assignee_id, createdById: task.created_by_id, parentId: task.parent_id, createdAt: task.created_at, assignedAt: task.assigned_at, dueDate: task.due_date, completedAt: task.completed_at };
+  return { id: task.id, title: task.title, projectId: task.project_id, description: task.description, due: task.due, priority: task.priority, status: taskStatusFromRow(task.status), progress: task.progress, assigneeId: task.assignee_id, createdById: task.created_by_id, parentId: task.parent_id, createdAt: task.created_at, assignedAt: task.assigned_at, dueDate: task.due_date, completedAt: task.completed_at, archivedAt: task.archived_at };
 }
 function noteFromRow(note: Record<string, unknown>) {
   return { id: note.id, taskId: note.task_id, text: note.text, authorId: note.author_id, createdAt: note.created_at, readBy: note.read_by ?? [] };
@@ -81,7 +86,9 @@ export async function GET() {
       });
     }
     const users = (profiles.data ?? []).map((item) => ({ ...userFromProfile(item as ProfileRow), email: emailById.get(item.id) ?? (item.id === user.id ? user.email ?? "" : "") }));
-    return NextResponse.json({ currentUser: { ...userFromProfile(profile), email: user.email ?? "" }, users, projects: (projects.data ?? []).map(projectFromRow), tasks: (tasks.data ?? []).map(taskFromRow), notes: (notes.data ?? []).map(noteFromRow), progressLogs: (progressLogs.data ?? []).map(progressFromRow) }, { headers: { "Cache-Control": "no-store" } });
+    const activeTasks = (tasks.data ?? []).filter((task) => !task.archived_at);
+    const archivedTasks = (tasks.data ?? []).filter((task) => Boolean(task.archived_at));
+    return NextResponse.json({ currentUser: { ...userFromProfile(profile), email: user.email ?? "" }, users, projects: (projects.data ?? []).map(projectFromRow), tasks: activeTasks.map(taskFromRow), archivedTasks: archivedTasks.map(taskFromRow), notes: (notes.data ?? []).map(noteFromRow), progressLogs: (progressLogs.data ?? []).map(progressFromRow) }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return fail(error instanceof Error ? error.message : "Unable to load workspace.", 401);
   }
@@ -175,6 +182,29 @@ export async function POST(request: Request) {
       }
       if (logError) return fail(logError.message);
       return NextResponse.json({ ok: true });
+    }
+
+    if (input.action === "archive_task") {
+      if (context.profile.role !== "Admin" && context.profile.role !== "Manager") return fail("Only admins and managers can archive tasks.", 403);
+      const { data: taskRows, error: tasksError } = await context.client.from("tasks").select("id, parent_id, status, archived_at");
+      if (tasksError) return fail(tasksError.message, 500);
+      const rows = (taskRows ?? []) as Array<{ id: string; parent_id: string | null; status: string; archived_at: string | null }>;
+      const task = rows.find((row) => row.id === input.taskId);
+      if (!task || task.archived_at) return fail("Task not found.", 404);
+      const descendants: typeof rows = [];
+      const collectDescendants = (parentId: string) => {
+        rows.filter((row) => row.parent_id === parentId).forEach((child) => {
+          descendants.push(child);
+          collectDescendants(child.id);
+        });
+      };
+      collectDescendants(task.id);
+      if (!isCompletedStatus(task.status)) return fail("Only completed tasks can be archived.");
+      if (descendants.some((child) => !isCompletedStatus(child.status))) return fail("Complete all subtasks before archiving this task.");
+      const archiveIds = [task.id, ...descendants.map((child) => child.id)];
+      const { error: archiveError } = await context.client.from("tasks").update({ archived_at: new Date().toISOString() }).in("id", archiveIds);
+      if (archiveError) return fail(archiveError.message);
+      return NextResponse.json({ ok: true, archivedTaskIds: archiveIds });
     }
 
     return fail("Unsupported action.");

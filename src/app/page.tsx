@@ -38,6 +38,7 @@ type Task = {
   assignedAt?: string;
   dueDate?: string;
   completedAt?: string;
+  archivedAt?: string;
 };
 
 type Note = {
@@ -89,6 +90,7 @@ export default function Home() {
   const [users, setUsers] = useState<User[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [archivedTasks, setArchivedTasks] = useState<Task[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
   const [progressLogs, setProgressLogs] = useState<ProgressLog[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -154,6 +156,7 @@ export default function Home() {
     setUsers(data.users ?? []);
     setProjects(data.projects ?? []);
     setTasks(data.tasks ?? []);
+    setArchivedTasks(data.archivedTasks ?? []);
     setNotes(data.notes ?? []);
     setProgressLogs(data.progressLogs ?? []);
     setCurrentUserId(data.currentUser?.id ?? null);
@@ -366,6 +369,7 @@ export default function Home() {
       "Team tasks": "tasks",
       "My daily updates": "tasks",
       Projects: "projects",
+      Archive: "archive",
       Reports: "reports",
       "My profile": "profile",
     };
@@ -558,6 +562,39 @@ export default function Home() {
     }
   };
 
+  const getTaskDescendants = (taskId: string, source: Task[] = tasks) => {
+    const descendants: Task[] = [];
+    const collect = (parentId: string) => {
+      source.filter((task) => task.parentId === parentId).forEach((child) => {
+        descendants.push(child);
+        collect(child.id);
+      });
+    };
+    collect(taskId);
+    return descendants;
+  };
+
+  const canArchiveTask = (task: Task) => {
+    if (currentUser?.role !== "Admin" && currentUser?.role !== "Manager") return false;
+    if (task.status !== "Completed") return false;
+    return getTaskDescendants(task.id).every((child) => child.status === "Completed");
+  };
+
+  const archiveTask = async (task: Task) => {
+    if (!canArchiveTask(task)) {
+      setNotice("Complete all subtasks before archiving this task.");
+      return;
+    }
+    if (!window.confirm(`Archive ${task.title} and its completed subtasks?`)) return;
+    try {
+      await apiRequest("archive_task", { taskId: task.id });
+      await loadWorkspace();
+      setNotice("Task moved to Archive.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Unable to archive task.");
+    }
+  };
+
   const renderTask = (task: Task, depth = 0): React.ReactNode => {
     const children = sortTasksNewestFirst(visibleTasks.filter((child) => child.parentId === task.id));
     const canEditTask = currentUser?.role === "Employee" && task.assigneeId === currentUser.id;
@@ -725,14 +762,24 @@ export default function Home() {
         <td className="px-3 py-4 break-words text-xs text-slate-500">{formatTimestamp(task.createdAt)}</td>
         <td className="px-3 py-4 break-words text-xs text-slate-600">{formatTimestamp(task.completedAt)}</td>
         <td className="px-3 py-4">
-          {canAddNote && (
-            <button
-              onClick={() => toggleMessages(task.id)}
-              className={`rounded-lg px-2 py-2 text-xs font-semibold ${hasNewMessages ? "animate-pulse bg-yellow-300 text-orange-900 shadow-[inset_0_0_0_2px_rgb(245_158_11)]" : "bg-slate-100 text-slate-700 hover:bg-indigo-50 hover:text-indigo-700"}`}
-            >
-              {hasNewMessages ? "NEW message" : taskNotes.length ? `${taskNotes.length} messages` : "Add message"}
-            </button>
-          )}
+          <div className="flex flex-wrap gap-2">
+            {canAddNote && (
+              <button
+                onClick={() => toggleMessages(task.id)}
+                className={`rounded-lg px-2 py-2 text-xs font-semibold ${hasNewMessages ? "animate-pulse bg-yellow-300 text-orange-900 shadow-[inset_0_0_0_2px_rgb(245_158_11)]" : "bg-slate-100 text-slate-700 hover:bg-indigo-50 hover:text-indigo-700"}`}
+              >
+                {hasNewMessages ? "NEW message" : taskNotes.length ? `${taskNotes.length} messages` : "Add message"}
+              </button>
+            )}
+            {canArchiveTask(task) && (
+              <button
+                onClick={() => archiveTask(task)}
+                className="rounded-lg bg-amber-100 px-2 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-200"
+              >
+                Archive
+              </button>
+            )}
+          </div>
         </td>
       </tr>,
     ];
@@ -849,6 +896,30 @@ export default function Home() {
 
     children.forEach((child) => rows.push(...renderTaskRow(child, depth + 1)));
     return rows;
+  };
+
+  const renderArchivedTask = (task: Task, depth = 0): React.ReactNode => {
+    const children = sortTasksNewestFirst(archivedTasks.filter((child) => child.parentId === task.id));
+    return (
+      <div key={task.id} className={depth ? "ml-6 border-l-2 border-amber-200 pl-4" : ""}>
+        <div className="rounded-xl border border-amber-200 bg-amber-50/50 p-4">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p className="font-semibold text-slate-900">{task.title}</p>
+              <p className="mt-1 text-xs font-medium text-amber-700">{task.parentId ? "Archived subtask" : "Archived task"} · {getProjectName(task.projectId)}</p>
+              <p className="mt-2 text-sm text-slate-600">{task.description}</p>
+            </div>
+            <span className="shrink-0 rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700">Completed</span>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
+            <span>Assigned to: <strong className="font-semibold text-slate-700">{getUserName(task.assigneeId)}</strong></span>
+            <span>Created: {formatTimestamp(task.createdAt)}</span>
+            <span>Archived: {formatTimestamp(task.archivedAt)}</span>
+          </div>
+        </div>
+        {children.length > 0 && <div className="mt-3 space-y-3">{children.map((child) => renderArchivedTask(child, depth + 1))}</div>}
+      </div>
+    );
   };
 
   if (!hydrated) {
@@ -1009,6 +1080,7 @@ export default function Home() {
               "Dashboard",
               currentUser.role === "Admin" ? "User management" : currentUser.role === "Manager" ? "Team tasks" : "My daily updates",
               "Projects",
+              "Archive",
               "My profile",
               ...(currentUser.role === "Employee" ? [] : ["Reports"]),
             ].map((item) => (
@@ -1043,7 +1115,7 @@ export default function Home() {
             </button>
           </div>
           <nav className="mt-4 flex flex-wrap gap-2">
-            {["Dashboard", currentUser.role === "Admin" ? "User management" : currentUser.role === "Manager" ? "Team tasks" : "My daily updates", "Projects", "My profile", ...(currentUser.role === "Employee" ? [] : ["Reports"])].map((item) => (
+            {["Dashboard", currentUser.role === "Admin" ? "User management" : currentUser.role === "Manager" ? "Team tasks" : "My daily updates", "Projects", "Archive", "My profile", ...(currentUser.role === "Employee" ? [] : ["Reports"])].map((item) => (
               <a key={item} href={`#${sectionTarget(item)}`} onClick={(event) => { event.preventDefault(); navigateTo(item); }} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700">
                 {item}
               </a>
@@ -1179,6 +1251,22 @@ export default function Home() {
                   )}
                 </table>
               </div>
+            </div>
+
+            <div id="archive" className="mt-8 rounded-xl bg-white p-6 shadow-sm">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h3 className="text-xl font-bold">Archive <span className="text-base font-medium text-slate-400">({archivedTasks.length})</span></h3>
+                  <p className="mt-1 text-sm text-slate-500">Completed tasks removed from the team board, with their subtask hierarchy preserved.</p>
+                </div>
+              </div>
+              {archivedTasks.length > 0 ? (
+                <div className="mt-5 space-y-3">
+                  {sortTasksNewestFirst(archivedTasks.filter((task) => !task.parentId)).map((task) => renderArchivedTask(task))}
+                </div>
+              ) : (
+                <p className="mt-5 rounded-lg border border-dashed border-slate-200 p-6 text-center text-sm text-slate-500">No archived tasks yet.</p>
+              )}
             </div>
 
             {currentUser.role !== "Employee" && (
