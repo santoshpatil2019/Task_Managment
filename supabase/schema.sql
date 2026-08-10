@@ -1,5 +1,5 @@
 create type public.app_role as enum ('Admin', 'Manager', 'Employee');
-create type public.task_status as enum ('Not started', 'In progress', 'Blocked', 'Complete');
+create type public.task_status as enum ('Not started', 'In progress', 'Completed');
 create type public.task_priority as enum ('High', 'Medium', 'Low');
 
 create table public.profiles (

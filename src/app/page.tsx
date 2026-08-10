@@ -5,7 +5,7 @@ import type { FormEvent } from "react";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase/browser";
 
 type Role = "Admin" | "Manager" | "Employee";
-type TaskStatus = "Not started" | "In progress" | "Blocked" | "Complete";
+type TaskStatus = "Not started" | "In progress" | "Completed";
 type Modal = "user" | "project" | "task" | null;
 
 type User = {
@@ -253,7 +253,7 @@ export default function Home() {
 
     return tasks.filter((task) => visibleIds.has(task.id));
   }, [currentUser, tasks]);
-  const completedCount = visibleTasks.filter((task) => task.status === "Complete").length;
+  const completedCount = visibleTasks.filter((task) => task.status === "Completed").length;
   const pendingCount = visibleTasks.length - completedCount;
   const averageProgress = visibleTasks.length
     ? Math.round(visibleTasks.reduce((sum, task) => sum + task.progress, 0) / visibleTasks.length)
@@ -266,16 +266,14 @@ export default function Home() {
   const getProjectStatus = (projectId: string): TaskStatus => {
     const projectTasks = visibleTasks.filter((task) => task.projectId === projectId);
     if (projectTasks.length === 0) return "Not started";
-    if (projectTasks.every((task) => task.status === "Complete")) return "Complete";
-    if (projectTasks.some((task) => task.status === "Blocked")) return "Blocked";
+    if (projectTasks.every((task) => task.status === "Completed")) return "Completed";
     if (projectTasks.some((task) => task.status === "In progress" || task.progress > 0)) {
       return "In progress";
     }
     return "Not started";
   };
   const projectStatusClass = (status: TaskStatus) => {
-    if (status === "Complete") return "bg-emerald-50 text-emerald-700";
-    if (status === "Blocked") return "bg-red-50 text-red-700";
+    if (status === "Completed") return "bg-emerald-50 text-emerald-700";
     if (status === "In progress") return "bg-indigo-50 text-indigo-700";
     return "bg-slate-100 text-slate-600";
   };
@@ -646,8 +644,7 @@ export default function Home() {
                 >
                   <option>Not started</option>
                   <option>In progress</option>
-                  <option>Blocked</option>
-                  <option>Complete</option>
+                  <option>Completed</option>
                 </select>
                 <div className="flex items-center gap-2">
                   <input
@@ -808,6 +805,15 @@ export default function Home() {
                 placeholder="Add your daily status update in the description..."
               />
               <div className="space-y-2">
+                <select
+                  value={edit.status}
+                  onChange={(event) => updateEmployeeEdit(task, { status: event.target.value as TaskStatus })}
+                  className="w-full rounded-lg border bg-white px-3 py-2 text-sm"
+                >
+                  <option>Not started</option>
+                  <option>In progress</option>
+                  <option>Completed</option>
+                </select>
                 <div className="flex items-center gap-2">
                   <input
                     type="range"
@@ -960,7 +966,7 @@ export default function Home() {
   const reportAverageProgress = latestReportByTask.length
     ? Math.round(latestReportByTask.reduce((sum, log) => sum + log.progress, 0) / latestReportByTask.length)
     : 0;
-  const reportCompletedCount = latestReportByTask.filter((log) => log.status === "Complete").length;
+  const reportCompletedCount = latestReportByTask.filter((log) => log.status === "Completed").length;
   const reportPeriodLabel = reportPeriod === "Daily"
     ? "today"
     : reportPeriod === "Weekly"

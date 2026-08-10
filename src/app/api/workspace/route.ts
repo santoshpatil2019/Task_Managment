@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const roleSchema = z.enum(["Admin", "Manager", "Employee"]);
-const statusSchema = z.enum(["Not started", "In progress", "Blocked", "Complete"]);
+const statusSchema = z.enum(["Not started", "In progress", "Completed"]);
 const prioritySchema = z.enum(["High", "Medium", "Low"]);
 const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("create_user"), name: z.string().trim().min(2).max(120), email: z.string().trim().email().max(254), password: z.string().min(8).max(128), role: roleSchema }),
@@ -20,6 +20,17 @@ const actionSchema = z.discriminatedUnion("action", [
 ]);
 
 type ProfileRow = { id: string; name: string; role: "Admin" | "Manager" | "Employee"; active: boolean };
+type TaskStatus = "Not started" | "In progress" | "Completed";
+
+function taskStatusFromRow(value: unknown): TaskStatus {
+  if (value === "Completed" || value === "Complete") return "Completed";
+  if (value === "In progress") return "In progress";
+  return "Not started";
+}
+
+function isLegacyStatusError(error: { message?: string } | null) {
+  return Boolean(error?.message && /task_status|invalid input value for enum/i.test(error.message));
+}
 
 function userFromProfile(profile: ProfileRow) {
   return { id: profile.id, name: profile.name, email: "", role: profile.role, active: profile.active };
@@ -28,13 +39,13 @@ function projectFromRow(project: Record<string, unknown>) {
   return { id: project.id, name: project.name, description: project.description };
 }
 function taskFromRow(task: Record<string, unknown>) {
-  return { id: task.id, title: task.title, projectId: task.project_id, description: task.description, due: task.due, priority: task.priority, status: task.status, progress: task.progress, assigneeId: task.assignee_id, createdById: task.created_by_id, parentId: task.parent_id, createdAt: task.created_at, assignedAt: task.assigned_at, dueDate: task.due_date, completedAt: task.completed_at };
+  return { id: task.id, title: task.title, projectId: task.project_id, description: task.description, due: task.due, priority: task.priority, status: taskStatusFromRow(task.status), progress: task.progress, assigneeId: task.assignee_id, createdById: task.created_by_id, parentId: task.parent_id, createdAt: task.created_at, assignedAt: task.assigned_at, dueDate: task.due_date, completedAt: task.completed_at };
 }
 function noteFromRow(note: Record<string, unknown>) {
   return { id: note.id, taskId: note.task_id, text: note.text, authorId: note.author_id, createdAt: note.created_at, readBy: note.read_by ?? [] };
 }
 function progressFromRow(log: Record<string, unknown>) {
-  return { id: log.id, taskId: log.task_id, employeeId: log.employee_id, description: log.description, status: log.status, progress: log.progress, createdAt: log.created_at };
+  return { id: log.id, taskId: log.task_id, employeeId: log.employee_id, description: log.description, status: taskStatusFromRow(log.status), progress: log.progress, createdAt: log.created_at };
 }
 async function getContext() {
   if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) throw new Error("Supabase is not configured.");
@@ -150,10 +161,18 @@ export async function POST(request: Request) {
       const { data: task, error: taskError } = await context.client.from("tasks").select("assignee_id, completed_at").eq("id", input.taskId).single();
       if (taskError || !task || task.assignee_id !== context.user.id) return fail("Task not found.", 404);
       const createdAt = new Date().toISOString();
-      const completedAt = input.status === "Complete" ? task.completed_at ?? createdAt : null;
-      const { error: updateError } = await context.client.from("tasks").update({ description: input.description, status: input.status, progress: input.progress, completed_at: completedAt }).eq("id", input.taskId);
+      const completedAt = input.status === "Completed" ? task.completed_at ?? createdAt : null;
+      const update = { description: input.description, status: input.status, progress: input.progress, completed_at: completedAt };
+      let { error: updateError } = await context.client.from("tasks").update(update).eq("id", input.taskId);
+      if (isLegacyStatusError(updateError) && input.status === "Completed") {
+        ({ error: updateError } = await context.client.from("tasks").update({ ...update, status: "Complete" }).eq("id", input.taskId));
+      }
       if (updateError) return fail(updateError.message);
-      const { error: logError } = await context.client.from("progress_logs").insert({ id: `progress-${crypto.randomUUID()}`, task_id: input.taskId, employee_id: context.user.id, description: input.description, status: input.status, progress: input.progress, created_at: createdAt });
+      const log = { id: `progress-${crypto.randomUUID()}`, task_id: input.taskId, employee_id: context.user.id, description: input.description, status: input.status, progress: input.progress, created_at: createdAt };
+      let { error: logError } = await context.client.from("progress_logs").insert(log);
+      if (isLegacyStatusError(logError) && input.status === "Completed") {
+        ({ error: logError } = await context.client.from("progress_logs").insert({ ...log, status: "Complete" }));
+      }
       if (logError) return fail(logError.message);
       return NextResponse.json({ ok: true });
     }
