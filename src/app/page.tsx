@@ -62,6 +62,32 @@ type ProgressLog = {
 const STORAGE_KEY = "task-management-role-data-v1";
 const SESSION_KEY = "task-management-current-user";
 
+const formatReportDateInput = (date: Date) => {
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  return `${day}/${month}/${date.getFullYear()}`;
+};
+
+const parseReportDateInput = (value: string, endOfDay = false) => {
+  const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(value.trim());
+  if (!match) return null;
+  const [, dayText, monthText, yearText] = match;
+  const date = new Date(
+    Number(yearText),
+    Number(monthText) - 1,
+    Number(dayText),
+    endOfDay ? 23 : 0,
+    endOfDay ? 59 : 0,
+    endOfDay ? 59 : 0,
+    endOfDay ? 999 : 0,
+  );
+  return date.getFullYear() === Number(yearText)
+    && date.getMonth() === Number(monthText) - 1
+    && date.getDate() === Number(dayText)
+    ? date
+    : null;
+};
+
 const demoUsers: User[] = [
   {
     id: "user-admin",
@@ -264,9 +290,9 @@ export default function Home() {
   const [customReportStart, setCustomReportStart] = useState(() => {
     const date = new Date();
     date.setDate(1);
-    return date.toISOString().slice(0, 10);
+    return formatReportDateInput(date);
   });
-  const [customReportEnd, setCustomReportEnd] = useState(() => new Date().toISOString().slice(0, 10));
+  const [customReportEnd, setCustomReportEnd] = useState(() => formatReportDateInput(new Date()));
   const [profileName, setProfileName] = useState("");
   const [profilePassword, setProfilePassword] = useState("");
   const [profilePasswordConfirm, setProfilePasswordConfirm] = useState("");
@@ -323,7 +349,7 @@ export default function Home() {
   const currentUser = users.find((user) => user.id === currentUserId) ?? null;
   const employees = users.filter((user) => user.role === "Employee" && user.active);
   useEffect(() => {
-    if (currentUser?.role === "Employee") {
+    if (currentUser) {
       setProfileName(currentUser.name);
       setProfilePassword("");
       setProfilePasswordConfirm("");
@@ -522,7 +548,7 @@ export default function Home() {
 
   const updateOwnProfile = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!currentUser || currentUser.role !== "Employee") return;
+    if (!currentUser) return;
     const nextName = profileName.trim();
     if (!nextName) {
       setNotice("Your name cannot be empty.");
@@ -1057,16 +1083,18 @@ export default function Home() {
       const daysSinceMonday = start.getDay() === 0 ? 6 : start.getDay() - 1;
       start.setDate(start.getDate() - daysSinceMonday);
     } else if (reportPeriod === "Custom") {
-      const customStart = new Date(`${customReportStart}T00:00:00`);
-      const customEnd = new Date(`${customReportEnd}T23:59:59.999`);
-      if (!Number.isNaN(customStart.getTime())) start.setTime(customStart.getTime());
-      if (!Number.isNaN(customEnd.getTime())) end.setTime(customEnd.getTime());
+      const customStart = parseReportDateInput(customReportStart);
+      const customEnd = parseReportDateInput(customReportEnd, true);
+      if (customStart) start.setTime(customStart.getTime());
+      if (customEnd) end.setTime(customEnd.getTime());
     }
     return {
       start,
       end,
       valid: reportPeriod !== "Custom"
-        || (Boolean(customReportStart) && Boolean(customReportEnd) && start <= end),
+        || (Boolean(parseReportDateInput(customReportStart))
+          && Boolean(parseReportDateInput(customReportEnd, true))
+          && start <= end),
     };
   })();
   const reportTaskIds = new Set(visibleTasks.map((task) => task.id));
@@ -1092,7 +1120,7 @@ export default function Home() {
       : reportPeriod === "Monthly"
         ? "this month"
         : reportRange.valid
-          ? `${formatDateOnly(customReportStart)} to ${formatDateOnly(customReportEnd)}`
+          ? `${customReportStart} to ${customReportEnd}`
           : "the selected date range";
 
   return (
@@ -1115,7 +1143,7 @@ export default function Home() {
               "Dashboard",
               currentUser.role === "Admin" ? "User management" : currentUser.role === "Manager" ? "Team tasks" : "My daily updates",
               "Projects",
-              ...(currentUser.role === "Employee" ? ["My profile"] : []),
+              "My profile",
               ...(currentUser.role === "Employee" ? [] : ["Reports"]),
             ].map((item) => (
               <a key={item} href={`#${sectionTarget(item)}`} onClick={(event) => { event.preventDefault(); navigateTo(item); }} className="block w-full rounded-xl px-3 py-2.5 text-left text-sm font-medium text-slate-600 hover:bg-indigo-50 hover:text-indigo-700">{item}</a>
@@ -1149,7 +1177,7 @@ export default function Home() {
             </button>
           </div>
           <nav className="mt-4 flex flex-wrap gap-2">
-            {["Dashboard", currentUser.role === "Admin" ? "User management" : currentUser.role === "Manager" ? "Team tasks" : "My daily updates", "Projects", ...(currentUser.role === "Employee" ? ["My profile"] : []), ...(currentUser.role === "Employee" ? [] : ["Reports"])].map((item) => (
+            {["Dashboard", currentUser.role === "Admin" ? "User management" : currentUser.role === "Manager" ? "Team tasks" : "My daily updates", "Projects", "My profile", ...(currentUser.role === "Employee" ? [] : ["Reports"])].map((item) => (
               <a key={item} href={`#${sectionTarget(item)}`} onClick={(event) => { event.preventDefault(); navigateTo(item); }} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700">
                 {item}
               </a>
@@ -1197,13 +1225,12 @@ export default function Home() {
               <div className="rounded-xl bg-white p-5 shadow-sm"><p className="text-sm text-slate-500">Average progress</p><p className="mt-2 text-3xl font-bold text-indigo-600">{averageProgress}%</p></div>
             </div>
 
-            {currentUser.role === "Employee" && (
-              <div id="profile" className="mt-8 rounded-xl bg-white p-6 shadow-sm">
-                <div>
-                  <h3 className="text-xl font-bold">My profile</h3>
-                  <p className="mt-1 text-sm text-slate-500">Update your display name or change your password. Your role and permissions are managed by an administrator.</p>
-                </div>
-                <form onSubmit={updateOwnProfile} className="mt-5 grid gap-4 md:grid-cols-2">
+            <div id="profile" className="mt-8 rounded-xl bg-white p-6 shadow-sm">
+              <div>
+                <h3 className="text-xl font-bold">My profile</h3>
+                <p className="mt-1 text-sm text-slate-500">Update your display name or change your password. Your role and permissions are managed by an administrator.</p>
+              </div>
+              <form onSubmit={updateOwnProfile} className="mt-5 grid gap-4 md:grid-cols-2">
                   <label className="block text-sm font-semibold text-slate-700">
                     Display name
                     <input value={profileName} onChange={(event) => setProfileName(event.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2.5 font-normal" />
@@ -1223,9 +1250,8 @@ export default function Home() {
                   <div className="md:col-span-2">
                     <button className="rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700">Save profile changes</button>
                   </div>
-                </form>
-              </div>
-            )}
+              </form>
+            </div>
 
             {currentUser.role === "Admin" && (
               <div id="user-management" className="mt-8 rounded-xl bg-white p-6 shadow-sm">
@@ -1317,14 +1343,15 @@ export default function Home() {
                   <div className="grid gap-4 sm:grid-cols-2">
                     <label className="block text-sm font-semibold text-slate-700">
                       Start date
-                      <input type="date" value={customReportStart} onChange={(event) => setCustomReportStart(event.target.value)} className="mt-1 w-full rounded-lg border border-indigo-100 bg-white px-3 py-2.5 font-normal" />
+                      <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={customReportStart} onChange={(event) => setCustomReportStart(event.target.value)} className="mt-1 w-full rounded-lg border border-indigo-100 bg-white px-3 py-2.5 font-normal" />
                     </label>
                     <label className="block text-sm font-semibold text-slate-700">
                       End date
-                      <input type="date" value={customReportEnd} onChange={(event) => setCustomReportEnd(event.target.value)} className="mt-1 w-full rounded-lg border border-indigo-100 bg-white px-3 py-2.5 font-normal" />
+                      <input type="text" inputMode="numeric" placeholder="DD/MM/YYYY" value={customReportEnd} onChange={(event) => setCustomReportEnd(event.target.value)} className="mt-1 w-full rounded-lg border border-indigo-100 bg-white px-3 py-2.5 font-normal" />
                     </label>
                   </div>
-                  {!reportRange.valid && <p className="mt-3 text-sm font-medium text-red-700">Choose a valid range where the start date is not after the end date.</p>}
+                  <p className="mt-3 text-xs text-indigo-700">Enter dates in DD/MM/YYYY format.</p>
+                  {!reportRange.valid && <p className="mt-2 text-sm font-medium text-red-700">Enter valid dates and choose a range where the start date is not after the end date.</p>}
                 </div>
               )}
 
