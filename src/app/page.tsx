@@ -260,7 +260,16 @@ export default function Home() {
   const [noteTaskId, setNoteTaskId] = useState<string | null>(null);
   const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null);
   const [noteText, setNoteText] = useState("");
-  const [reportPeriod, setReportPeriod] = useState<"Daily" | "Weekly" | "Monthly">("Daily");
+  const [reportPeriod, setReportPeriod] = useState<"Daily" | "Weekly" | "Monthly" | "Custom">("Daily");
+  const [customReportStart, setCustomReportStart] = useState(() => {
+    const date = new Date();
+    date.setDate(1);
+    return date.toISOString().slice(0, 10);
+  });
+  const [customReportEnd, setCustomReportEnd] = useState(() => new Date().toISOString().slice(0, 10));
+  const [profileName, setProfileName] = useState("");
+  const [profilePassword, setProfilePassword] = useState("");
+  const [profilePasswordConfirm, setProfilePasswordConfirm] = useState("");
   const [employeeEdits, setEmployeeEdits] = useState<
     Record<string, { description: string; status: TaskStatus; progress: number }>
   >({});
@@ -313,6 +322,13 @@ export default function Home() {
 
   const currentUser = users.find((user) => user.id === currentUserId) ?? null;
   const employees = users.filter((user) => user.role === "Employee" && user.active);
+  useEffect(() => {
+    if (currentUser?.role === "Employee") {
+      setProfileName(currentUser.name);
+      setProfilePassword("");
+      setProfilePasswordConfirm("");
+    }
+  }, [currentUserId]);
   const visibleTasks = useMemo(() => {
     if (!currentUser || currentUser.role !== "Employee") return tasks;
 
@@ -436,6 +452,7 @@ export default function Home() {
       "My daily updates": "tasks",
       Projects: "projects",
       Reports: "reports",
+      "My profile": "profile",
     };
     return targets[item] ?? "dashboard";
   };
@@ -501,6 +518,31 @@ export default function Home() {
       current.map((user) => (user.id === userId ? { ...user, role } : user)),
     );
     setNotice("User role updated.");
+  };
+
+  const updateOwnProfile = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!currentUser || currentUser.role !== "Employee") return;
+    const nextName = profileName.trim();
+    if (!nextName) {
+      setNotice("Your name cannot be empty.");
+      return;
+    }
+    if (profilePassword && profilePassword.length < 6) {
+      setNotice("Your new password must be at least 6 characters.");
+      return;
+    }
+    if (profilePassword !== profilePasswordConfirm) {
+      setNotice("The password confirmation does not match.");
+      return;
+    }
+
+    setUsers((current) => current.map((user) => user.id === currentUser.id
+      ? { ...user, name: nextName, ...(profilePassword ? { password: profilePassword } : {}) }
+      : user));
+    setProfilePassword("");
+    setProfilePasswordConfirm("");
+    setNotice(profilePassword ? "Name and password updated." : "Name updated.");
   };
 
   const toggleUser = (userId: string) => {
@@ -1004,22 +1046,34 @@ export default function Home() {
   }
 
   const rootTasks = visibleTasks.filter((task) => !task.parentId);
-  const reportStart = (() => {
+  const reportRange = (() => {
     const start = new Date();
     start.setHours(0, 0, 0, 0);
+    const end = new Date();
+    end.setHours(23, 59, 59, 999);
     if (reportPeriod === "Monthly") {
       start.setDate(1);
     } else if (reportPeriod === "Weekly") {
       const daysSinceMonday = start.getDay() === 0 ? 6 : start.getDay() - 1;
       start.setDate(start.getDate() - daysSinceMonday);
+    } else if (reportPeriod === "Custom") {
+      const customStart = new Date(`${customReportStart}T00:00:00`);
+      const customEnd = new Date(`${customReportEnd}T23:59:59.999`);
+      if (!Number.isNaN(customStart.getTime())) start.setTime(customStart.getTime());
+      if (!Number.isNaN(customEnd.getTime())) end.setTime(customEnd.getTime());
     }
-    return start;
+    return {
+      start,
+      end,
+      valid: reportPeriod !== "Custom"
+        || (Boolean(customReportStart) && Boolean(customReportEnd) && start <= end),
+    };
   })();
   const reportTaskIds = new Set(visibleTasks.map((task) => task.id));
   const reportLogs = progressLogs
     .filter((log) => reportTaskIds.has(log.taskId))
     .filter((log) => currentUser.role !== "Employee" || log.employeeId === currentUser.id)
-    .filter((log) => new Date(log.createdAt) >= reportStart)
+    .filter((log) => reportRange.valid && new Date(log.createdAt) >= reportRange.start && new Date(log.createdAt) <= reportRange.end)
     .sort((first, second) => second.createdAt.localeCompare(first.createdAt));
   const latestReportByTask = Array.from(
     reportLogs.reduce((latest, log) => {
@@ -1031,7 +1085,15 @@ export default function Home() {
     ? Math.round(latestReportByTask.reduce((sum, log) => sum + log.progress, 0) / latestReportByTask.length)
     : 0;
   const reportCompletedCount = latestReportByTask.filter((log) => log.status === "Complete").length;
-  const reportPeriodLabel = reportPeriod === "Daily" ? "today" : reportPeriod === "Weekly" ? "this week" : "this month";
+  const reportPeriodLabel = reportPeriod === "Daily"
+    ? "today"
+    : reportPeriod === "Weekly"
+      ? "this week"
+      : reportPeriod === "Monthly"
+        ? "this month"
+        : reportRange.valid
+          ? `${formatDateOnly(customReportStart)} to ${formatDateOnly(customReportEnd)}`
+          : "the selected date range";
 
   return (
     <main className="min-h-screen bg-[#f4f7fb] text-slate-900">
@@ -1053,6 +1115,7 @@ export default function Home() {
               "Dashboard",
               currentUser.role === "Admin" ? "User management" : currentUser.role === "Manager" ? "Team tasks" : "My daily updates",
               "Projects",
+              ...(currentUser.role === "Employee" ? ["My profile"] : []),
               ...(currentUser.role === "Employee" ? [] : ["Reports"]),
             ].map((item) => (
               <a key={item} href={`#${sectionTarget(item)}`} onClick={(event) => { event.preventDefault(); navigateTo(item); }} className="block w-full rounded-xl px-3 py-2.5 text-left text-sm font-medium text-slate-600 hover:bg-indigo-50 hover:text-indigo-700">{item}</a>
@@ -1086,7 +1149,7 @@ export default function Home() {
             </button>
           </div>
           <nav className="mt-4 flex flex-wrap gap-2">
-            {["Dashboard", currentUser.role === "Admin" ? "User management" : currentUser.role === "Manager" ? "Team tasks" : "My daily updates", "Projects", ...(currentUser.role === "Employee" ? [] : ["Reports"])].map((item) => (
+            {["Dashboard", currentUser.role === "Admin" ? "User management" : currentUser.role === "Manager" ? "Team tasks" : "My daily updates", "Projects", ...(currentUser.role === "Employee" ? ["My profile"] : []), ...(currentUser.role === "Employee" ? [] : ["Reports"])].map((item) => (
               <a key={item} href={`#${sectionTarget(item)}`} onClick={(event) => { event.preventDefault(); navigateTo(item); }} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700">
                 {item}
               </a>
@@ -1133,6 +1196,36 @@ export default function Home() {
               <div className="rounded-xl bg-white p-5 shadow-sm"><p className="text-sm text-slate-500">Completed</p><p className="mt-2 text-3xl font-bold text-green-600">{completedCount}</p></div>
               <div className="rounded-xl bg-white p-5 shadow-sm"><p className="text-sm text-slate-500">Average progress</p><p className="mt-2 text-3xl font-bold text-indigo-600">{averageProgress}%</p></div>
             </div>
+
+            {currentUser.role === "Employee" && (
+              <div id="profile" className="mt-8 rounded-xl bg-white p-6 shadow-sm">
+                <div>
+                  <h3 className="text-xl font-bold">My profile</h3>
+                  <p className="mt-1 text-sm text-slate-500">Update your display name or change your password. Your role and permissions are managed by an administrator.</p>
+                </div>
+                <form onSubmit={updateOwnProfile} className="mt-5 grid gap-4 md:grid-cols-2">
+                  <label className="block text-sm font-semibold text-slate-700">
+                    Display name
+                    <input value={profileName} onChange={(event) => setProfileName(event.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2.5 font-normal" />
+                  </label>
+                  <label className="block text-sm font-semibold text-slate-700">
+                    Work email
+                    <input value={currentUser.email} disabled className="mt-1 w-full rounded-lg border bg-slate-50 px-3 py-2.5 font-normal text-slate-500" />
+                  </label>
+                  <label className="block text-sm font-semibold text-slate-700">
+                    New password
+                    <input type="password" value={profilePassword} onChange={(event) => setProfilePassword(event.target.value)} placeholder="Leave blank to keep current password" className="mt-1 w-full rounded-lg border px-3 py-2.5 font-normal" />
+                  </label>
+                  <label className="block text-sm font-semibold text-slate-700">
+                    Confirm new password
+                    <input type="password" value={profilePasswordConfirm} onChange={(event) => setProfilePasswordConfirm(event.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2.5 font-normal" />
+                  </label>
+                  <div className="md:col-span-2">
+                    <button className="rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700">Save profile changes</button>
+                  </div>
+                </form>
+              </div>
+            )}
 
             {currentUser.role === "Admin" && (
               <div id="user-management" className="mt-8 rounded-xl bg-white p-6 shadow-sm">
@@ -1201,10 +1294,10 @@ export default function Home() {
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div>
                   <h3 className="text-xl font-bold">Reports</h3>
-                  <p className="mt-1 text-sm text-slate-500">Review daily, weekly, and monthly progress reports and update logs.</p>
+                  <p className="mt-1 text-sm text-slate-500">Review daily, weekly, monthly, or custom-range progress reports and update logs.</p>
                 </div>
                 <div className="flex flex-wrap gap-2 rounded-lg bg-slate-100 p-1" role="tablist" aria-label="Report period">
-                  {(["Daily", "Weekly", "Monthly"] as const).map((period) => (
+                  {(["Daily", "Weekly", "Monthly", "Custom"] as const).map((period) => (
                     <button
                       key={period}
                       type="button"
@@ -1218,6 +1311,22 @@ export default function Home() {
                   ))}
                 </div>
               </div>
+
+              {reportPeriod === "Custom" && (
+                <div className="mt-4 rounded-xl border border-indigo-100 bg-indigo-50/60 p-4">
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label className="block text-sm font-semibold text-slate-700">
+                      Start date
+                      <input type="date" value={customReportStart} onChange={(event) => setCustomReportStart(event.target.value)} className="mt-1 w-full rounded-lg border border-indigo-100 bg-white px-3 py-2.5 font-normal" />
+                    </label>
+                    <label className="block text-sm font-semibold text-slate-700">
+                      End date
+                      <input type="date" value={customReportEnd} onChange={(event) => setCustomReportEnd(event.target.value)} className="mt-1 w-full rounded-lg border border-indigo-100 bg-white px-3 py-2.5 font-normal" />
+                    </label>
+                  </div>
+                  {!reportRange.valid && <p className="mt-3 text-sm font-medium text-red-700">Choose a valid range where the start date is not after the end date.</p>}
+                </div>
+              )}
 
               <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                 <div className="rounded-xl border border-indigo-100 bg-indigo-50 p-4">
