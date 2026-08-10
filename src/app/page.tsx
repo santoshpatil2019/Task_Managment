@@ -733,12 +733,12 @@ export default function Home() {
     const rows: React.ReactNode[] = [
       <tr key={task.id} className="border-t border-slate-200 align-top hover:bg-slate-50">
         <td className="px-3 py-4" style={{ paddingLeft: `${12 + depth * 24}px` }}>
-          <div className="flex min-w-0 items-start gap-2">
+          <div className="flex min-w-0 items-start justify-center gap-2 text-center">
             {depth > 0 && <span className="pt-0.5 text-indigo-400">↳</span>}
             <div>
               <p className="font-semibold text-slate-900">{task.title}</p>
               <p className="mt-1 text-xs font-medium text-violet-700">{task.parentId ? "Subtask" : "Task"}</p>
-              <div className="group relative mt-1 w-fit max-w-full">
+              <div className="group relative mx-auto mt-1 w-fit max-w-full">
                 <button
                   type="button"
                   aria-describedby={`task-description-${task.id}`}
@@ -762,7 +762,7 @@ export default function Home() {
         </td>
         <td className="px-3 py-4 break-words text-xs text-slate-600">{task.priority}</td>
         <td className="px-3 py-4">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center justify-center gap-2">
             <div className="h-2 w-12 rounded-full bg-slate-100 sm:w-20">
               <div className="h-2 rounded-full bg-indigo-600" style={{ width: `${task.progress}%` }} />
             </div>
@@ -777,7 +777,7 @@ export default function Home() {
         <td className="px-3 py-4 break-words text-xs text-slate-500">{formatTimestamp(task.createdAt)}</td>
         <td className="px-3 py-4 break-words text-xs text-slate-600">{formatTimestamp(task.completedAt)}</td>
         <td className="px-3 py-4">
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap justify-center gap-2">
             {canAddNote && (
               <button
                 onClick={() => toggleMessages(task.id)}
@@ -1222,7 +1222,7 @@ export default function Home() {
             <div id="tasks" className="mt-8 rounded-xl bg-slate-100 p-6">
               <div className="flex items-center justify-between"><div><h3 className="text-xl font-bold">{currentUser.role === "Employee" ? "My daily updates" : "Team task board"}</h3><p className="mt-1 text-sm text-slate-500">{currentUser.role === "Manager" ? "Create tasks, subtasks, messages, and assignments for employees." : currentUser.role === "Employee" ? "Update your daily description, progress, and messages." : "View all work across the workspace."}</p></div>{currentUser.role === "Manager" && <button onClick={() => setModal("task")} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white">+ New task</button>}</div>
               <div className="mt-5 rounded-xl border border-slate-200 bg-white">
-                <table className="w-full table-fixed text-left text-sm">
+                <table className="w-full table-fixed text-center text-sm">
                   <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                     <tr>
                       <th className="px-3 py-3">Task / Subtask</th>
