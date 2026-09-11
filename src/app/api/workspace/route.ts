@@ -5,7 +5,7 @@ import { createSupabaseAdminClient, createSupabaseServerClient } from "@/lib/sup
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-const roleSchema = z.enum(["Admin", "Manager", "Employee"]);
+const roleSchema = z.enum(["Admin", "Manager", "Senior Employee", "Employee"]);
 const statusSchema = z.enum(["Not started", "In progress", "Completed"]);
 const prioritySchema = z.enum(["High", "Medium", "Low"]);
 const actionSchema = z.discriminatedUnion("action", [
@@ -13,14 +13,16 @@ const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("update_user"), userId: z.string().uuid(), role: roleSchema.optional(), active: z.boolean().optional() }),
   z.object({ action: z.literal("update_profile"), name: z.string().trim().min(2).max(120) }),
   z.object({ action: z.literal("create_project"), name: z.string().trim().min(2).max(160), description: z.string().trim().max(1000).default("") }),
-  z.object({ action: z.literal("create_task"), title: z.string().trim().min(2).max(200), description: z.string().trim().max(5000).default(""), projectId: z.string().min(1), assigneeId: z.string().uuid(), parentId: z.string().nullable().optional(), priority: prioritySchema, dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }),
+  z.object({ action: z.literal("create_task"), title: z.string().trim().min(2).max(200), description: z.string().trim().max(5000).default(""), projectId: z.string().min(1), assigneeId: z.string().uuid(), parentId: z.string().nullable().optional(), priority: prioritySchema, startDate: z.iso.date(), dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }),
+  z.object({ action: z.literal("edit_task"), taskId: z.string().min(1), title: z.string().trim().min(2).max(200), description: z.string().trim().max(5000), assigneeId: z.string().uuid(), priority: prioritySchema, startDate: z.iso.date(), dueDate: z.iso.date() }),
   z.object({ action: z.literal("add_note"), taskId: z.string().min(1), text: z.string().trim().min(1).max(5000) }),
   z.object({ action: z.literal("mark_messages_read"), taskId: z.string().min(1) }),
   z.object({ action: z.literal("save_employee_update"), taskId: z.string().min(1), description: z.string().trim().max(5000), status: statusSchema, progress: z.number().int().min(0).max(100) }),
+  z.object({ action: z.literal("review_task"), taskId: z.string().min(1), decision: z.enum(["submit", "approve", "request_changes"]), feedback: z.string().trim().max(5000).default("") }),
   z.object({ action: z.literal("archive_task"), taskId: z.string().min(1) }),
 ]);
 
-type ProfileRow = { id: string; name: string; role: "Admin" | "Manager" | "Employee"; active: boolean };
+type ProfileRow = { id: string; name: string; role: "Admin" | "Manager" | "Senior Employee" | "Employee"; active: boolean };
 type TaskStatus = "Not started" | "In progress" | "Completed";
 
 function taskStatusFromRow(value: unknown): TaskStatus {
@@ -44,7 +46,7 @@ function projectFromRow(project: Record<string, unknown>) {
   return { id: project.id, name: project.name, description: project.description };
 }
 function taskFromRow(task: Record<string, unknown>) {
-  return { id: task.id, title: task.title, projectId: task.project_id, description: task.description, due: task.due, priority: task.priority, status: taskStatusFromRow(task.status), progress: task.progress, assigneeId: task.assignee_id, createdById: task.created_by_id, parentId: task.parent_id, createdAt: task.created_at, assignedAt: task.assigned_at, dueDate: task.due_date, completedAt: task.completed_at, archivedAt: task.archived_at };
+  return { id: task.id, title: task.title, projectId: task.project_id, description: task.description, due: task.due, priority: task.priority, status: taskStatusFromRow(task.status), progress: task.progress, assigneeId: task.assignee_id, createdById: task.created_by_id, parentId: task.parent_id, createdAt: task.created_at, assignedAt: task.assigned_at, dueDate: task.due_date, startDate: task.start_date, completedAt: task.completed_at, archivedAt: task.archived_at, reviewEnabled: "review_state" in task, reviewState: task.review_state ?? "none", reviewNote: task.review_note ?? "", reviewedBy: task.reviewed_by, reviewedAt: task.reviewed_at };
 }
 function noteFromRow(note: Record<string, unknown>) {
   return { id: note.id, taskId: note.task_id, text: note.text, authorId: note.author_id, createdAt: note.created_at, readBy: note.read_by ?? [] };
@@ -137,50 +139,68 @@ export async function POST(request: Request) {
     }
 
     if (input.action === "create_task") {
-      if (context.profile.role !== "Manager") return fail("Only managers can create tasks.", 403);
-      const { error } = await context.client.from("tasks").insert({ id: `task-${crypto.randomUUID()}`, title: input.title, description: input.description || "No description yet.", project_id: input.projectId, assignee_id: input.assigneeId, created_by_id: context.user.id, parent_id: input.parentId || null, priority: input.priority, due: input.dueDate, due_date: input.dueDate, status: "Not started", progress: 0 });
+      if (!["Manager", "Senior Employee"].includes(context.profile.role)) return fail("You cannot create tasks.", 403);
+      const { data: assignee } = await context.client.from("profiles").select("role, active").eq("id", input.assigneeId).single();
+      if (!assignee?.active || !["Senior Employee", "Employee"].includes(assignee.role)) return fail("Choose an active employee.");
+      if (input.parentId) {
+        const { data: parent } = await context.client.from("tasks").select("project_id, assignee_id, archived_at").eq("id", input.parentId).single();
+        if (!parent || parent.archived_at || parent.project_id !== input.projectId) return fail("Invalid parent task.", 403);
+        if (context.profile.role === "Senior Employee" && (parent.assignee_id !== context.user.id || assignee.role !== "Employee")) return fail("You may delegate only your assigned tasks to employees.", 403);
+      } else if (context.profile.role === "Senior Employee") return fail("Senior employees must select an assigned parent task.", 403);
+      if (input.dueDate < input.startDate) return fail("Due date must be on or after the start date.");
+      const { error } = await context.client.from("tasks").insert({ id: `task-${crypto.randomUUID()}`, title: input.title, description: input.description || "No description yet.", project_id: input.projectId, assignee_id: input.assigneeId, created_by_id: context.user.id, parent_id: input.parentId || null, priority: input.priority, due: input.dueDate, due_date: input.dueDate, start_date: input.startDate, status: "Not started", progress: 0 });
       if (error) return fail(error.message);
       return NextResponse.json({ ok: true });
     }
 
+    if (input.action === "edit_task") {
+      if (!["Admin", "Manager"].includes(context.profile.role)) return fail("Only admins and managers can edit assignments.", 403);
+      if (input.dueDate < input.startDate) return fail("Due date must be on or after the start date.");
+      const { data: assignee } = await context.client.from("profiles").select("role, active").eq("id", input.assigneeId).single();
+      if (!assignee?.active || !["Senior Employee", "Employee"].includes(assignee.role)) return fail("Choose an active employee.");
+      const { data: task } = await context.client.from("tasks").select("*").eq("id", input.taskId).single();
+      if (!task || task.archived_at) return fail("Active task not found.", 404);
+      if (task.review_state === "pending" || isCompletedStatus(task.status)) return fail("Request changes before editing submitted work, or create a follow-up task for completed work.");
+      const { data, error } = await context.client.from("tasks").update({ title: input.title, description: input.description, assignee_id: input.assigneeId, priority: input.priority, start_date: input.startDate, due_date: input.dueDate, due: input.dueDate, ...(task.assignee_id !== input.assigneeId ? { assigned_at: new Date().toISOString() } : {}) }).eq("id", input.taskId).is("archived_at", null).select("id").single();
+      if (error || !data) return fail(error?.message ?? "Unable to edit task.");
+      return NextResponse.json({ ok: true });
+    }
+
     if (input.action === "add_note") {
-      const { data: task, error: taskError } = await context.client.from("tasks").select("assignee_id").eq("id", input.taskId).single();
+      const { data: task, error: taskError } = await context.client.from("tasks").select("assignee_id, created_by_id").eq("id", input.taskId).single();
       if (taskError || !task) return fail("Task not found.", 404);
-      if (context.profile.role !== "Manager" && task.assignee_id !== context.user.id) return fail("You cannot message this task.", 403);
+      if (context.profile.role !== "Manager" && task.assignee_id !== context.user.id && !(context.profile.role === "Senior Employee" && task.created_by_id === context.user.id)) return fail("You cannot message this task.", 403);
       const { error } = await context.client.from("notes").insert({ id: `note-${crypto.randomUUID()}`, task_id: input.taskId, text: input.text, author_id: context.user.id, read_by: [context.user.id] });
       if (error) return fail(error.message);
       return NextResponse.json({ ok: true });
     }
 
     if (input.action === "mark_messages_read") {
-      if (!process.env.SUPABASE_SERVICE_ROLE_KEY) return fail("The server service key is not configured.", 500);
-      const { data: task } = await context.client.from("tasks").select("assignee_id").eq("id", input.taskId).single();
-      if (!task || (context.profile.role === "Employee" && task.assignee_id !== context.user.id)) return fail("Task not found.", 404);
-      const admin = createSupabaseAdminClient();
-      const { data: taskNotes, error } = await admin.from("notes").select("id, read_by").eq("task_id", input.taskId);
-      if (error) return fail(error.message, 500);
-      for (const note of taskNotes ?? []) await admin.from("notes").update({ read_by: Array.from(new Set([...(note.read_by ?? []), context.user.id])) }).eq("id", note.id);
+      const { error } = await context.client.rpc("mark_task_messages_read", { target_task_id: input.taskId });
+      if (error) return fail(error.message, 403);
       return NextResponse.json({ ok: true });
     }
 
     if (input.action === "save_employee_update") {
-      if (context.profile.role !== "Employee") return fail("Only employees can save daily updates.", 403);
-      const { data: task, error: taskError } = await context.client.from("tasks").select("assignee_id, completed_at").eq("id", input.taskId).single();
+      if (!["Employee", "Senior Employee"].includes(context.profile.role)) return fail("Only employees can save daily updates.", 403);
+      const { data: task, error: taskError } = await context.client.from("tasks").select("*").eq("id", input.taskId).single();
       if (taskError || !task || task.assignee_id !== context.user.id) return fail("Task not found.", 404);
       const createdAt = new Date().toISOString();
       const completedAt = input.status === "Completed" ? task.completed_at ?? createdAt : null;
-      const update = { description: input.description, status: input.status, progress: input.progress, completed_at: completedAt };
-      let { error: updateError } = await context.client.from("tasks").update(update).eq("id", input.taskId);
-      if (isLegacyStatusError(updateError) && input.status === "Completed") {
-        ({ error: updateError } = await context.client.from("tasks").update({ ...update, status: "Complete" }).eq("id", input.taskId));
-      }
+      const update = { status: input.status, progress: input.progress, completed_at: completedAt };
+      const { error: updateError } = await context.client.from("tasks").update(update).eq("id", input.taskId);
+
       if (updateError) return fail(updateError.message);
       const log = { id: `progress-${crypto.randomUUID()}`, task_id: input.taskId, employee_id: context.user.id, description: input.description, status: input.status, progress: input.progress, created_at: createdAt };
-      let { error: logError } = await context.client.from("progress_logs").insert(log);
-      if (isLegacyStatusError(logError) && input.status === "Completed") {
-        ({ error: logError } = await context.client.from("progress_logs").insert({ ...log, status: "Complete" }));
-      }
+      const { error: logError } = await context.client.from("progress_logs").insert(log);
+
       if (logError) return fail(logError.message);
+      return NextResponse.json({ ok: true });
+    }
+
+    if (input.action === "review_task") {
+      const { error } = await context.client.rpc("review_task", { target_task_id: input.taskId, decision: input.decision, feedback: input.feedback });
+      if (error) return fail(error.message, 403);
       return NextResponse.json({ ok: true });
     }
 

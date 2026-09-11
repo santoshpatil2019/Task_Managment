@@ -1,10 +1,12 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
+import TaskDetailsPanel from "@/components/task-details-panel";
+import ThemeToggle from "@/components/theme-toggle";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase/browser";
 
-type Role = "Admin" | "Manager" | "Employee";
+type Role = "Admin" | "Manager" | "Senior Employee" | "Employee";
 type TaskStatus = "Not started" | "In progress" | "Completed";
 type Modal = "user" | "project" | "task" | null;
 
@@ -37,8 +39,14 @@ type Task = {
   createdAt?: string;
   assignedAt?: string;
   dueDate?: string;
+  startDate?: string;
   completedAt?: string;
   archivedAt?: string;
+  reviewEnabled?: boolean;
+  reviewState?: "none" | "pending" | "changes_requested" | "approved";
+  reviewNote?: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
 };
 
 type Note = {
@@ -60,7 +68,12 @@ type ProgressLog = {
   createdAt: string;
 };
 
+const isWorker = (role?: Role) => role === "Senior Employee" || role === "Employee";
 const ARCHIVE_PAGE_SIZE = 10;
+const localDateInput = () => {
+  const date = new Date();
+  return [date.getFullYear(), String(date.getMonth() + 1).padStart(2, "0"), String(date.getDate()).padStart(2, "0")].join("-");
+};
 
 const formatReportDateInput = (date: Date) => {
   const day = String(date.getDate()).padStart(2, "0");
@@ -100,6 +113,10 @@ export default function Home() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(() => !isSupabaseConfigured);
   const [now, setNow] = useState(() => Date.now());
+  const [taskFilters, setTaskFilters] = useState({ search: "", project: "", status: "", priority: "", assignee: "", due: "" });
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [expandedTasks, setExpandedTasks] = useState<Record<string, boolean>>({});
+  const [activeSection, setActiveSection] = useState("dashboard");
   const [modal, setModal] = useState<Modal>(null);
   const [notice, setNotice] = useState("");
 
@@ -115,18 +132,28 @@ export default function Home() {
   const [newProjectName, setNewProjectName] = useState("");
   const [newProjectDescription, setNewProjectDescription] = useState("");
 
+  const [reviewFeedback, setReviewFeedback] = useState<Record<string, string>>({});
+  const [reviewBusy, setReviewBusy] = useState<string | null>(null);
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
+  const [taskFormError, setTaskFormError] = useState("");
+  const [savingTask, setSavingTask] = useState(false);
   const [newTaskTitle, setNewTaskTitle] = useState("");
   const [newTaskDescription, setNewTaskDescription] = useState("");
   const [newTaskProjectId, setNewTaskProjectId] = useState("");
   const [newTaskAssigneeId, setNewTaskAssigneeId] = useState("");
-  const [newTaskDue, setNewTaskDue] = useState(() => new Date().toISOString().slice(0, 10));
+  const [newTaskStart, setNewTaskStart] = useState(localDateInput);
+  const [newTaskDue, setNewTaskDue] = useState(localDateInput);
   const [newTaskPriority, setNewTaskPriority] = useState<Task["priority"]>(
     "Medium",
   );
   const [newTaskParentId, setNewTaskParentId] = useState("");
 
   const [noteTaskId, setNoteTaskId] = useState<string | null>(null);
-  const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatProjectId, setChatProjectId] = useState("");
+  const [sendingMessage, setSendingMessage] = useState(false);
+  const [chatError, setChatError] = useState("");
+  const chatEndRef = useRef<HTMLDivElement>(null);
   const [noteText, setNoteText] = useState("");
   const [reportPeriod, setReportPeriod] = useState<"Daily" | "Weekly" | "Monthly" | "Custom">("Daily");
   const [customReportStart, setCustomReportStart] = useState(() => {
@@ -141,6 +168,10 @@ export default function Home() {
   const [employeeEdits, setEmployeeEdits] = useState<
     Record<string, { description: string; status: TaskStatus; progress: number }>
   >({});
+
+  useEffect(() => {
+    if (chatOpen) chatEndRef.current?.scrollIntoView({ block: "nearest" });
+  }, [chatOpen, noteTaskId, notes.length]);
 
   const apiRequest = async (action: string, payload: Record<string, unknown> = {}) => {
     const response = await fetch("/api/workspace", {
@@ -186,6 +217,9 @@ export default function Home() {
     void bootstrap();
     const { data: authListener } = client.auth.onAuthStateChange((event) => {
       if (event === "SIGNED_OUT") {
+        setChatOpen(false);
+        setNoteTaskId(null);
+        setActiveSection("dashboard");
         setCurrentUserId(null);
         setUsers([]);
         setProjects([]);
@@ -237,13 +271,13 @@ export default function Home() {
   }, []);
 
   const currentUser = users.find((user) => user.id === currentUserId) ?? null;
-  const employees = users.filter((user) => user.role === "Employee" && user.active);
+  const employees = users.filter((user) => user.active && (currentUser?.role === "Senior Employee" ? user.role === "Employee" : isWorker(user.role)));
   const visibleTasks = useMemo(() => {
-    if (!currentUser || currentUser.role !== "Employee") return tasks;
+    if (!currentUser || !isWorker(currentUser.role)) return tasks;
 
     const visibleIds = new Set(
       tasks
-        .filter((task) => task.assigneeId === currentUser.id)
+        .filter((task) => task.assigneeId === currentUser.id || (currentUser.role === "Senior Employee" && task.createdById === currentUser.id))
         .map((task) => task.id),
     );
 
@@ -314,28 +348,28 @@ export default function Home() {
   const isNewMessage = (note: Note) => {
     if (!currentUser || note.authorId === currentUser.id) return false;
     if (note.readBy?.includes(currentUser.id)) return false;
-    const createdAt = Date.parse(note.createdAt);
-    return !Number.isNaN(createdAt) && now - createdAt < 24 * 60 * 60 * 1000;
+    return true;
   };
 
   const markMessagesRead = (taskId: string) => {
     if (!currentUser) return;
-    setNotes((current) => current.map((note) => note.taskId === taskId
-      ? { ...note, readBy: Array.from(new Set([...(note.readBy ?? []), currentUser.id])) }
-      : note));
-    void apiRequest("mark_messages_read", { taskId }).catch((error) => {
-      setNotice(error instanceof Error ? error.message : "Unable to update message status.");
+    void apiRequest("mark_messages_read", { taskId }).then(() => {
+      setNotes((current) => current.map((note) => note.taskId === taskId
+        ? { ...note, readBy: Array.from(new Set([...(note.readBy ?? []), currentUser.id])) }
+        : note));
+    }).catch((error) => {
+      setChatError(error instanceof Error ? error.message : "Unable to update message status.");
     });
   };
 
   const toggleMessages = (taskId: string) => {
-    if (noteTaskId !== taskId) markMessagesRead(taskId);
-    setNoteTaskId(noteTaskId === taskId ? null : taskId);
-  };
-
-  const showMessageDetails = (note: Note) => {
-    setSelectedMessageId(note.id);
-    markMessagesRead(note.taskId);
+    setSelectedTaskId(null);
+    markMessagesRead(taskId);
+    setNoteTaskId(taskId);
+    setChatProjectId(tasks.find((task) => task.id === taskId)?.projectId ?? "");
+    setChatOpen(true);
+    setNoteText("");
+    setChatError("");
   };
 
   const latestTaskCreatedTime = (task: Task, allTasks: Task[]): number => {
@@ -356,16 +390,6 @@ export default function Home() {
       return secondTime - firstTime || first.title.localeCompare(second.title);
     });
 
-  const sortNotesNewestFirst = (items: Note[]) =>
-    [...items].sort((first, second) => {
-      const firstTime = Date.parse(first.createdAt);
-      const secondTime = Date.parse(second.createdAt);
-      if (Number.isNaN(firstTime) || Number.isNaN(secondTime)) {
-        return second.createdAt.localeCompare(first.createdAt);
-      }
-      return secondTime - firstTime;
-    });
-
   const sectionTarget = (item: string) => {
     const targets: Record<string, string> = {
       Dashboard: "dashboard",
@@ -374,17 +398,24 @@ export default function Home() {
       "My daily updates": "tasks",
       Projects: "projects",
       Archive: "archive",
-      Reports: "reports",
+      Chats: "chats",
+
       "My profile": "profile",
     };
     return targets[item] ?? "dashboard";
   };
 
   const navigateTo = (item: string) => {
-    document.getElementById(sectionTarget(item))?.scrollIntoView({
-      behavior: "smooth",
-      block: "start",
-    });
+    if (item === "Chats") { setChatOpen(true); return; }
+    setActiveSection(sectionTarget(item));
+    window.scrollTo({ top: 0, behavior: "instant" });
+  };
+
+  const openProjectTasks = (projectId: string) => {
+    setTaskFilters({ search: "", project: projectId, status: "", priority: "", assignee: "", due: "" });
+    setSelectedTaskId(null);
+    setChatOpen(false);
+    navigateTo("My daily updates");
   };
 
   const login = async (event: FormEvent<HTMLFormElement>) => {
@@ -493,52 +524,94 @@ export default function Home() {
     }
   };
 
+  const openTaskForm = (parent?: Task) => {
+    setSelectedTaskId(null);
+    const today = localDateInput();
+    setEditingTaskId(null);
+    setTaskFormError("");
+    setNewTaskTitle("");
+    setNewTaskDescription("");
+    setNewTaskParentId(parent?.id ?? "");
+    setNewTaskProjectId(parent?.projectId ?? projects[0]?.id ?? "");
+    setNewTaskAssigneeId(parent && employees.some((user) => user.id === parent.assigneeId) ? parent.assigneeId : employees[0]?.id ?? "");
+    setNewTaskPriority(parent?.priority ?? "Medium");
+    setNewTaskStart(today);
+    setNewTaskDue(parent?.dueDate && parent.dueDate >= today ? parent.dueDate : today);
+    setModal("task");
+  };
+
+  const openEditTask = (task: Task) => {
+    setSelectedTaskId(null);
+    setEditingTaskId(task.id);
+    setTaskFormError("");
+    setNewTaskTitle(task.title);
+    setNewTaskDescription(task.description);
+    setNewTaskParentId(task.parentId ?? "");
+    setNewTaskProjectId(task.projectId);
+    setNewTaskAssigneeId(task.assigneeId);
+    setNewTaskPriority(task.priority);
+    setNewTaskStart(task.startDate ?? task.assignedAt?.slice(0, 10) ?? localDateInput());
+    setNewTaskDue(task.dueDate ?? localDateInput());
+    setModal("task");
+  };
+
   const createTask = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!currentUser || currentUser.role !== "Manager" || !newTaskTitle.trim()) return;
+    if (!currentUser || savingTask || !newTaskTitle.trim()) return;
+    setTaskFormError("");
 
     const projectId = newTaskProjectId || projects[0]?.id;
     const assigneeId = newTaskAssigneeId || employees[0]?.id;
     if (!projectId || !assigneeId) {
-      setNotice("Create an employee and project before adding a task.");
+      setTaskFormError("Create an employee and project before adding a task.");
+      return;
+    }
+
+    if (!newTaskStart || !newTaskDue || newTaskDue < newTaskStart) {
+      setTaskFormError("Due date must be on or after the start date.");
       return;
     }
 
     const parentTask = tasks.find((task) => task.id === newTaskParentId);
     const parentId = parentTask?.projectId === projectId ? parentTask.id : null;
+    if (currentUser.role === "Senior Employee" && (!parentTask || parentTask.assigneeId !== currentUser.id || !parentId)) { setNotice("Select one of your assigned tasks as the parent."); return; }
 
+    setSavingTask(true);
     try {
-      await apiRequest("create_task", { title: newTaskTitle, description: newTaskDescription, projectId, assigneeId, parentId, priority: newTaskPriority, dueDate: newTaskDue });
+      await apiRequest(editingTaskId ? "edit_task" : "create_task", { ...(editingTaskId ? { taskId: editingTaskId } : {}), title: newTaskTitle, description: newTaskDescription, projectId, assigneeId, parentId, priority: newTaskPriority, dueDate: newTaskDue, startDate: newTaskStart });
       await loadWorkspace();
       setNewTaskTitle("");
       setNewTaskDescription("");
       setNewTaskParentId("");
       setModal(null);
-      setNotice("Task created and assigned.");
+      setNotice(editingTaskId ? "Task changes saved." : "Task created and assigned.");
+      setEditingTaskId(null);
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Unable to create task.");
-    }
+      setTaskFormError(error instanceof Error ? error.message : "Unable to save task.");
+    } finally { setSavingTask(false); }
   };
 
   const addNote = async (taskId: string) => {
     const task = tasks.find((item) => item.id === taskId);
     const canAddNote = currentUser?.role === "Manager" ||
-      (currentUser?.role === "Employee" && task?.assigneeId === currentUser.id);
-    if (!currentUser || !canAddNote || !noteText.trim()) return;
+      (isWorker(currentUser?.role) && task?.assigneeId === currentUser?.id) || (currentUser?.role === "Senior Employee" && task?.createdById === currentUser.id);
+    if (!currentUser || !canAddNote || !noteText.trim() || sendingMessage) return;
+    setSendingMessage(true);
+    setChatError("");
     try {
       await apiRequest("add_note", { taskId, text: noteText });
       await loadWorkspace();
-      setNoteTaskId(null);
       setNoteText("");
-      setNotice("Message sent.");
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Unable to send message.");
+      setChatError(error instanceof Error ? error.message : "Unable to send message.");
+    } finally {
+      setSendingMessage(false);
     }
   };
 
   const getEmployeeEdit = (task: Task) =>
     employeeEdits[task.id] ?? {
-      description: task.description,
+      description: "",
       status: task.status,
       progress: task.progress,
     };
@@ -554,12 +627,13 @@ export default function Home() {
   };
 
   const saveEmployeeUpdate = async (task: Task) => {
-    if (!currentUser || currentUser.role !== "Employee") return;
+    if (!currentUser || !isWorker(currentUser.role)) return;
     const edit = getEmployeeEdit(task);
     const progress = Math.min(100, Math.max(0, edit.progress));
     try {
       await apiRequest("save_employee_update", { taskId: task.id, description: edit.description, status: edit.status, progress });
       await loadWorkspace();
+      setEmployeeEdits((current) => { const next = { ...current }; delete next[task.id]; return next; });
       setNotice("Daily task update saved.");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Unable to save daily update.");
@@ -599,19 +673,74 @@ export default function Home() {
     }
   };
 
-  const renderTask = (task: Task, depth = 0): React.ReactNode => {
-    const children = sortTasksNewestFirst(visibleTasks.filter((child) => child.parentId === task.id));
-    const canEditTask = currentUser?.role === "Employee" && task.assigneeId === currentUser.id;
+  const reviewTask = async (taskId: string, decision: "submit" | "approve" | "request_changes") => {
+    if (reviewBusy) return;
+    setReviewBusy(taskId);
+    try {
+      await apiRequest("review_task", { taskId, decision, feedback: reviewFeedback[taskId] ?? "" });
+      await loadWorkspace();
+      setEmployeeEdits((current) => { const next = { ...current }; delete next[taskId]; return next; });
+      setNotice(decision === "submit" ? "Task submitted for review." : decision === "approve" ? "Task approved and completed." : "Changes requested.");
+    } catch (error) { setNotice(error instanceof Error ? error.message : "Unable to update review."); }
+    finally { setReviewBusy(null); }
+  };
+
+  const renderUpdateHistory = (taskId: string) => {
+    const updates = progressLogs.filter((log) => log.taskId === taskId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
+    const latest = updates[0];
+    if (!latest) return <p className="mt-4 text-xs text-slate-400">No daily updates yet.</p>;
+    return (
+      <details className="group mt-4 rounded-xl border border-slate-200 bg-slate-50">
+        <summary className="cursor-pointer rounded-xl p-4 marker:text-indigo-600">
+          <span className="text-xs font-bold uppercase tracking-wide text-indigo-700">Latest update</span>
+          <span className="ml-3 text-xs text-slate-500">{formatTimestamp(latest.createdAt)} · {getUserName(latest.employeeId)}</span>
+          <p className="mt-2 whitespace-pre-wrap break-words text-sm text-slate-800">{latest.description || "Status and progress updated."}</p>
+          <div className="mt-2 flex flex-wrap items-center gap-3 text-xs"><span className="font-semibold text-slate-600">{latest.status} · {latest.progress}%</span><span className="font-semibold text-indigo-600 group-open:hidden">Show all updates ({updates.length})</span><span className="hidden font-semibold text-indigo-600 group-open:inline">Hide history</span></div>
+        </summary>
+        <ol aria-label="Daily update history, newest first" className="divide-y divide-slate-100 border-t border-slate-200 bg-white px-4">
+          {updates.map((log) => <li key={log.id} className="grid gap-2 py-4 sm:grid-cols-[180px_1fr]">
+            <div><time dateTime={log.createdAt} className="text-xs font-semibold text-slate-600">{formatTimestamp(log.createdAt)}</time><p className="mt-1 text-xs text-slate-500">{getUserName(log.employeeId)}</p></div>
+            <div className="min-w-0"><p className="whitespace-pre-wrap break-words text-sm text-slate-800">{log.description || "Status and progress updated."}</p><p className="mt-2 text-xs font-semibold text-indigo-600">{log.status} · {log.progress}%</p></div>
+          </li>)}
+        </ol>
+      </details>
+    );
+  };
+
+  const renderTask = (task: Task, depth = 0, detailed = false): React.ReactNode => {
+    const children = sortTasksNewestFirst(boardTasks.filter((child) => child.parentId === task.id));
+    const canEditTask = isWorker(currentUser?.role) && task.assigneeId === currentUser?.id;
+    const canReview = currentUser && (["Admin", "Manager"].includes(currentUser.role) || (currentUser.role === "Senior Employee" && task.createdById === currentUser.id && task.assigneeId !== currentUser.id));
     const edit = canEditTask ? getEmployeeEdit(task) : null;
     const taskNotes = notes.filter((note) => note.taskId === task.id);
+    const canAddSubtask = (currentUser?.role === "Manager" && !task.parentId) || (currentUser?.role === "Senior Employee" && task.assigneeId === currentUser.id);
+    const canManage = ["Admin", "Manager"].includes(currentUser?.role ?? "");
+    const unreadCount = taskNotes.filter(isNewMessage).length;
+    const openDetails = () => { setChatOpen(false); setSelectedTaskId(task.id); };
+    if (!detailed) return (
+      <div key={task.id} className={depth ? "ml-2 border-l-2 border-indigo-100 pl-3 sm:ml-5" : ""}>
+        <article className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="flex items-start justify-between gap-3">
+            <button onClick={openDetails} className="min-w-0 flex-1 break-words text-left text-base font-bold leading-relaxed text-slate-900 hover:text-indigo-600">{task.title}</button>
+            {(canAddSubtask || canManage || canArchiveTask(task)) && <details className="relative shrink-0" onClick={(event) => { if ((event.target as HTMLElement).closest("button")) event.currentTarget.open = false; }}><summary aria-label={"Actions for " + task.title} className="cursor-pointer list-none rounded-lg px-3 py-1 text-lg font-bold text-slate-500 hover:bg-slate-100">⋯</summary><div className="absolute right-0 z-10 mt-1 w-44 rounded-xl border border-slate-200 bg-white p-1 shadow-lg">{canAddSubtask && <button onClick={() => openTaskForm(task)} className="block w-full rounded-lg px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100">Add subtask</button>}{canManage && <button onClick={() => openEditTask(task)} className="block w-full rounded-lg px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100">Edit / reassign</button>}{canArchiveTask(task) && <button onClick={() => archiveTask(task)} className="block w-full rounded-lg px-3 py-2 text-left text-sm text-amber-700 hover:bg-slate-100">Archive task</button>}</div></details>}
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs"><span className="rounded-full bg-indigo-50 px-2 py-1 font-semibold text-indigo-700">{task.status}</span><span className="rounded-full bg-slate-100 px-2 py-1 text-slate-600">{task.priority}</span>{task.reviewState && task.reviewState !== "none" && <button onClick={openDetails} className="rounded-full bg-amber-50 px-2 py-1 font-semibold text-amber-700">{task.reviewState === "pending" ? "Awaiting review" : task.reviewState === "changes_requested" ? "Changes requested" : "Approved"}</button>}</div>
+          <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-slate-500"><span>{getUserName(task.assigneeId)}</span><span>Due {task.dueDate ? formatDateOnly(task.dueDate) : task.due}</span><span className="flex items-center gap-2"><span className="h-1.5 w-20 overflow-hidden rounded-full bg-slate-100"><span className="block h-full rounded-full bg-indigo-600" style={{width: task.progress + "%"}} /></span><span className="font-semibold text-indigo-600">{task.progress}%</span></span></div>
+          <div className="mt-3 flex flex-wrap items-center gap-4 text-xs font-semibold text-indigo-600"><button onClick={openDetails}>View details</button>{children.length > 0 && <button aria-expanded={Boolean(expandedTasks[task.id])} onClick={() => setExpandedTasks((current) => ({...current,[task.id]: !current[task.id]}))}>{expandedTasks[task.id] ? "▾" : "▸"} {children.length} subtasks</button>}<button onClick={() => toggleMessages(task.id)}>{unreadCount ? unreadCount + " unread messages" : "Chat · " + taskNotes.length}</button></div>
+        </article>
+        {children.length > 0 && expandedTasks[task.id] && <div className="mt-3 space-y-3">{children.map((child) => renderTask(child, depth + 1))}</div>}
+      </div>
+    );
+
 
     return (
-      <div key={task.id} className={depth ? "ml-6 border-l-2 border-indigo-100 pl-4" : ""}>
+      <div key={task.id} className={depth ? "ml-2 border-l-2 border-indigo-100 pl-3 sm:ml-5" : ""}>
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <div className="flex-1">
+            <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
-                <h4 className="font-semibold">{task.title}</h4>
+                <h4 className="w-full break-words text-lg font-semibold leading-relaxed text-slate-900">{task.title}</h4>
                 <span className="rounded-full bg-indigo-50 px-2 py-1 text-xs text-indigo-700">
                   {task.status}
                 </span>
@@ -622,15 +751,16 @@ export default function Home() {
                   {task.parentId ? "Subtask" : "Task"}
                 </span>
               </div>
-              <p className="mt-2 text-sm text-slate-500">{task.description}</p>
+              <p className="mt-2 whitespace-pre-wrap break-words text-sm text-slate-500">{task.description}</p>
               <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400">
                 <span>Project: {getProjectName(task.projectId)}</span>
-                <span>Due: {task.due}</span>
+                <span>Start: {task.startDate ? formatDateOnly(task.startDate) : formatDateOnly(task.assignedAt)}</span>
+                <span>Due: {task.dueDate ? formatDateOnly(task.dueDate) : task.due}</span>
                 <span>Assigned to: <strong className="font-semibold text-slate-600">{getUserName(task.assigneeId)}</strong></span>
                 <span>Assigned by: <strong className="font-semibold text-slate-600">{getUserName(task.createdById)}</strong></span>
               </div>
             </div>
-            <div className="w-full lg:min-w-32 lg:text-right">
+            <div className="w-full shrink-0 lg:w-32 lg:text-right">
               <p className="text-sm font-semibold text-indigo-600">{task.progress}%</p>
               <div className="mt-2 h-2 rounded-full bg-slate-100">
                 <div
@@ -641,66 +771,48 @@ export default function Home() {
             </div>
           </div>
 
-          {currentUser?.role === "Manager" && (
-            <div className="mt-4 border-t pt-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  onClick={() => setNoteTaskId(noteTaskId === task.id ? null : task.id)}
-                  className="rounded-lg bg-slate-100 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-indigo-50 hover:text-indigo-700"
-                >
-                  Add note
-                </button>
-                <span className="text-xs text-slate-500">{taskNotes.length} notes</span>
-              </div>
-              {noteTaskId === task.id && (
-                <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                <input
-                  value={noteText}
-                  onChange={(event) => setNoteText(event.target.value)}
-                  placeholder="Write a message..."
-                    className="flex-1 rounded-lg border px-3 py-2 text-sm outline-none focus:border-indigo-500"
-                  />
-                  <button
-                    onClick={() => addNote(task.id)}
-                    className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white"
-                  >
-                    Save
-                  </button>
-                </div>
-              )}
-              {taskNotes.length > 0 && (
-                <div className="mt-3 space-y-2">
-                  {taskNotes.slice(0, 2).map((note) => (
-                    <p key={note.id} className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
-                      {note.text} <span className="text-xs text-amber-700">— {getUserName(note.authorId)}</span>
-                    </p>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
+          <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-3">
+            <button onClick={() => toggleMessages(task.id)} className={taskNotes.some(isNewMessage) ? "rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white" : "rounded-lg bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-700"}>
+              {taskNotes.some(isNewMessage) ? "New messages" : "Open chat"} · {taskNotes.length}
+            </button>
+            {((currentUser?.role === "Manager" && !task.parentId) || (currentUser?.role === "Senior Employee" && task.assigneeId === currentUser.id)) && <button type="button" onClick={() => openTaskForm(task)} className="rounded-lg border border-indigo-200 px-3 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-50">+ Subtask</button>}
+            {["Admin", "Manager"].includes(currentUser?.role ?? "") && <button type="button" onClick={() => openEditTask(task)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50">Edit / reassign</button>}
+            {canArchiveTask(task) && <button onClick={() => archiveTask(task)} className="rounded-lg bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800">Archive task</button>}
+            <details className="text-xs text-slate-500"><summary className="cursor-pointer font-medium">Timeline</summary><div className="mt-2 flex flex-wrap gap-3"><span>Assigned: {formatDateOnly(getAssignedAt(task))}</span><span>Created: {formatTimestamp(task.createdAt)}</span><span>Elapsed: {getTaskDaysFromAssignment(task)}</span><span>Completed: {formatTimestamp(task.completedAt)}</span></div></details>
+          </div>
 
-          {canEditTask && edit && (
+          {task.reviewState && task.reviewState !== "none" && <div className="mt-4 rounded-lg border border-indigo-100 bg-indigo-50 p-3 text-sm text-indigo-700"><p className="font-semibold">{task.reviewState === "pending" ? "Awaiting review" : task.reviewState === "approved" ? "Approved" : "Changes requested"}</p>{task.reviewNote && <p className="mt-1 whitespace-pre-wrap break-words">{task.reviewNote}</p>}{task.reviewedBy && <p className="mt-1 text-xs">{getUserName(task.reviewedBy)} · {formatTimestamp(task.reviewedAt)}</p>}</div>}
+          {task.reviewEnabled && canEditTask && task.status !== "Completed" && task.reviewState !== "pending" && <button disabled={Boolean(reviewBusy)} onClick={() => reviewTask(task.id, "submit")} className="mt-4 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-40">Submit for review</button>}
+          {canReview && task.reviewState === "pending" && <div className="mt-4 space-y-2"><label className="block text-sm font-semibold text-slate-600">Review feedback<textarea maxLength={5000} value={reviewFeedback[task.id] ?? ""} onChange={(event) => setReviewFeedback((current) => ({ ...current, [task.id]: event.target.value }))} className="mt-1 w-full rounded-lg border border-slate-200 p-2 text-sm" placeholder="Explain any changes needed" /></label><div className="flex gap-2"><button disabled={Boolean(reviewBusy)} onClick={() => reviewTask(task.id, "approve")} className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-40">Approve</button><button disabled={Boolean(reviewBusy) || !reviewFeedback[task.id]?.trim()} onClick={() => reviewTask(task.id, "request_changes")} className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 disabled:opacity-40">Request changes</button></div></div>}
+          {renderUpdateHistory(task.id)}
+
+          {canEditTask && edit && task.status !== "Completed" && task.reviewState !== "pending" && (
             <div className="mt-4 grid gap-3 border-t pt-4 md:grid-cols-3">
+              <label className="block text-sm font-semibold text-slate-700 md:col-span-2">Today’s update
+              <span className="mt-1 block text-xs font-normal text-slate-500">Describe what you worked on, results, or blockers. The task description stays unchanged.</span>
               <textarea
                 value={edit.description}
                 onChange={(event) => updateEmployeeEdit(task, { description: event.target.value })}
                 rows={2}
-                className="rounded-lg border px-3 py-2 text-sm outline-none focus:border-indigo-500 md:col-span-2"
-                placeholder="Add your daily status update in the description..."
+                className="mt-2 w-full rounded-lg border px-3 py-2 text-sm font-normal outline-none focus:border-indigo-500"
+                placeholder="For example: Finished extraction; testing the JSON output."
+                maxLength={5000}
               />
+              </label>
               <div className="space-y-2">
                 <select
+                  aria-label="Task status"
                   value={edit.status}
                   onChange={(event) => updateEmployeeEdit(task, { status: event.target.value as TaskStatus })}
                   className="w-full rounded-lg border px-3 py-2 text-sm"
                 >
                   <option>Not started</option>
                   <option>In progress</option>
-                  <option>Completed</option>
+                  {!task.reviewEnabled && <option>Completed</option>}
                 </select>
                 <div className="flex items-center gap-2">
                   <input
+                    aria-label="Task progress"
                     type="range"
                     min="0"
                     max="100"
@@ -720,201 +832,9 @@ export default function Home() {
             </div>
           )}
         </div>
-        {children.length > 0 && <div className="mt-3 space-y-3">{children.map((child) => renderTask(child, depth + 1))}</div>}
+
       </div>
     );
-  };
-
-  const renderTaskRow = (task: Task, depth = 0): React.ReactNode[] => {
-    const children = sortTasksNewestFirst(
-      visibleTasks.filter((child) => child.parentId === task.id),
-    );
-    const taskNotes = sortNotesNewestFirst(notes.filter((note) => note.taskId === task.id));
-    const canEditTask = currentUser?.role === "Employee" && task.assigneeId === currentUser.id;
-    const canAddNote = currentUser?.role === "Manager" || canEditTask;
-    const hasNewMessages = taskNotes.some(isNewMessage);
-    const edit = canEditTask ? getEmployeeEdit(task) : null;
-    const rows: React.ReactNode[] = [
-      <tr key={task.id} className="border-t border-slate-200 align-middle hover:bg-slate-50">
-        <td className="px-3 py-4" style={{ paddingLeft: `${12 + depth * 24}px` }}>
-          <div className="flex min-w-0 items-center justify-center gap-2 text-center">
-            {depth > 0 && <span className="pt-0.5 text-indigo-400">↳</span>}
-            <div>
-              <p className="font-semibold text-slate-900">{task.title}</p>
-              <p className="mt-1 text-xs font-medium text-violet-700">{task.parentId ? "Subtask" : "Task"}</p>
-              <div className="group relative mx-auto mt-1 w-fit max-w-full">
-                <button
-                  type="button"
-                  aria-describedby={`task-description-${task.id}`}
-                  className="max-w-sm truncate text-left text-xs font-semibold text-indigo-600 underline decoration-dotted underline-offset-2 hover:text-indigo-800 focus:outline-none focus:ring-2 focus:ring-indigo-300"
-                >
-                  View description
-                </button>
-                <div
-                  id={`task-description-${task.id}`}
-                  role="tooltip"
-                  className="pointer-events-none invisible absolute left-0 top-full z-40 mt-2 w-72 max-w-[calc(100vw-2rem)] rounded-xl border border-indigo-200 bg-slate-950 p-3 text-left text-xs leading-5 text-white opacity-0 shadow-xl transition-opacity group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100"
-                >
-                  {task.description || "No description yet."}
-                </div>
-              </div>
-            </div>
-          </div>
-        </td>
-        <td className="px-3 py-4 break-words">
-          <span className="rounded-full bg-indigo-50 px-2 py-1 text-xs text-indigo-700">{task.status}</span>
-        </td>
-        <td className="px-3 py-4 break-words text-xs text-slate-600">{task.priority}</td>
-        <td className="px-3 py-4">
-          <div className="flex items-center justify-center gap-2">
-            <div className="h-2 w-12 rounded-full bg-slate-100 sm:w-20">
-              <div className="h-2 rounded-full bg-indigo-600" style={{ width: `${task.progress}%` }} />
-            </div>
-            <span className="text-xs font-semibold text-indigo-600">{task.progress}%</span>
-          </div>
-        </td>
-        <td className="px-3 py-4 break-words text-xs text-slate-600">{formatDateOnly(getAssignedAt(task))}</td>
-        <td className="px-3 py-4 break-words text-xs text-slate-600">{formatDateOnly(task.dueDate) === "Not recorded" ? task.due : formatDateOnly(task.dueDate)}</td>
-        <td className="px-3 py-4 break-words text-xs font-semibold text-slate-600">{getTaskDaysFromAssignment(task)}</td>
-        <td className="px-3 py-4 break-words text-xs font-semibold text-slate-700">{getUserName(task.assigneeId)}</td>
-        <td className="px-3 py-4 break-words text-xs font-semibold text-slate-700">{getUserName(task.createdById)}</td>
-        <td className="px-3 py-4 break-words text-xs text-slate-500">{formatTimestamp(task.createdAt)}</td>
-        <td className="px-3 py-4 break-words text-xs text-slate-600">{formatTimestamp(task.completedAt)}</td>
-        <td className="px-3 py-4">
-          <div className="flex flex-wrap justify-center gap-2">
-            {canAddNote && (
-              <button
-                onClick={() => toggleMessages(task.id)}
-                className={`rounded-lg px-2 py-2 text-xs font-semibold ${hasNewMessages ? "animate-pulse bg-yellow-300 text-orange-900 shadow-[inset_0_0_0_2px_rgb(245_158_11)]" : "bg-slate-100 text-slate-700 hover:bg-indigo-50 hover:text-indigo-700"}`}
-              >
-                {hasNewMessages ? "NEW message" : taskNotes.length ? `${taskNotes.length} messages` : "Add message"}
-              </button>
-            )}
-            {canArchiveTask(task) && (
-              <button
-                onClick={() => archiveTask(task)}
-                className="rounded-lg bg-amber-100 px-2 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-200"
-              >
-                Archive
-              </button>
-            )}
-          </div>
-        </td>
-      </tr>,
-    ];
-
-    if (canAddNote && noteTaskId === task.id) {
-      rows.push(
-        <tr key={`${task.id}-notes`} className="border-t border-slate-100 bg-amber-50/40">
-          <td colSpan={12} className="px-4 py-4">
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <input
-                value={noteText}
-                onChange={(event) => setNoteText(event.target.value)}
-                placeholder="Write a message..."
-                className="flex-1 rounded-lg border bg-white px-3 py-2 text-sm outline-none focus:border-indigo-500"
-              />
-              <button onClick={() => addNote(task.id)} className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white">
-                Send message
-              </button>
-            </div>
-            {taskNotes.length > 0 && (
-              <div className="mt-3 overflow-hidden rounded-lg border border-amber-100 bg-white">
-                <table className="w-full table-fixed text-left text-xs">
-                  <thead className="bg-amber-50 text-amber-700">
-                    <tr>
-                      <th className="w-[55%] px-3 py-2 font-semibold">Message</th>
-                      <th className="w-[20%] px-3 py-2 font-semibold">Sent by</th>
-                      <th className="w-[25%] px-3 py-2 font-semibold">Time</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {taskNotes.map((note) => (
-                      <Fragment key={note.id}>
-                      <tr onClick={() => showMessageDetails(note)} className={`cursor-pointer border-t border-amber-100 align-top text-amber-900 hover:bg-amber-50 ${isNewMessage(note) ? "animate-pulse bg-yellow-200 font-semibold shadow-[inset_0_0_0_2px_rgb(245_158_11)]" : ""}`}>
-                        <td className="break-words px-3 py-2">
-                          {isNewMessage(note) && <span className="mr-2 rounded-full bg-orange-500 px-2 py-0.5 text-[10px] font-bold uppercase text-white">NEW</span>}
-                          {note.text}
-                        </td>
-                        <td className="break-words px-3 py-2">{getUserName(note.authorId)}</td>
-                        <td className="break-words px-3 py-2 text-amber-700">{formatTimestamp(note.createdAt)}</td>
-                      </tr>
-                      {selectedMessageId === note.id && (
-                        <tr key={`${note.id}-details`}>
-                          <td colSpan={3} className="px-3 py-3">
-                            <div className="relative rounded-2xl border border-indigo-200 bg-indigo-50 p-4 text-indigo-950 shadow-sm">
-                              <span className="absolute -top-2 left-6 h-4 w-4 rotate-45 border-l border-t border-indigo-200 bg-indigo-50" />
-                              <button
-                                type="button"
-                                onClick={() => setSelectedMessageId(null)}
-                                aria-label="Close message details"
-                                className="absolute right-3 top-3 rounded-full px-2 py-1 text-lg leading-none text-indigo-500 hover:bg-indigo-200 hover:text-indigo-900"
-                              >
-                                ×
-                              </button>
-                              <p className="relative pr-8 text-xs font-bold uppercase tracking-wide text-indigo-600">Message details</p>
-                              <p className="relative mt-2 whitespace-pre-wrap text-sm">{note.text}</p>
-                              <p className="relative mt-3 text-xs text-indigo-700">Sent by {getUserName(note.authorId)} · {formatTimestamp(note.createdAt)} · {getProjectName(task.projectId)} · {task.title}</p>
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                      </Fragment>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </td>
-        </tr>,
-      );
-    }
-
-    if (canEditTask && edit) {
-      rows.push(
-        <tr key={`${task.id}-update`} className="border-t border-slate-100 bg-indigo-50/30">
-          <td colSpan={12} className="px-4 py-4">
-            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_240px]">
-              <textarea
-                value={edit.description}
-                onChange={(event) => updateEmployeeEdit(task, { description: event.target.value })}
-                rows={2}
-                className="rounded-lg border bg-white px-3 py-2 text-sm outline-none focus:border-indigo-500"
-                placeholder="Add your daily status update in the description..."
-              />
-              <div className="space-y-2">
-                <select
-                  value={edit.status}
-                  onChange={(event) => updateEmployeeEdit(task, { status: event.target.value as TaskStatus })}
-                  className="w-full rounded-lg border bg-white px-3 py-2 text-sm"
-                >
-                  <option>Not started</option>
-                  <option>In progress</option>
-                  <option>Completed</option>
-                </select>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    value={edit.progress}
-                    onChange={(event) => updateEmployeeEdit(task, { progress: Number(event.target.value) })}
-                    className="w-full accent-indigo-600"
-                  />
-                  <span className="w-10 text-right text-sm font-semibold">{edit.progress}%</span>
-                </div>
-                <button onClick={() => saveEmployeeUpdate(task)} className="w-full rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700">
-                  Save daily update
-                </button>
-              </div>
-            </div>
-          </td>
-        </tr>,
-      );
-    }
-
-    children.forEach((child) => rows.push(...renderTaskRow(child, depth + 1)));
-    return rows;
   };
 
   const renderArchivedTask = (task: Task, depth = 0): React.ReactNode => {
@@ -1040,7 +960,41 @@ export default function Home() {
     );
   }
 
-  const rootTasks = visibleTasks.filter((task) => !task.parentId);
+  const filtersActive = Object.values(taskFilters).some(Boolean);
+  const today = new Date(now);
+  const todayKey = [today.getFullYear(), String(today.getMonth() + 1).padStart(2, "0"), String(today.getDate()).padStart(2, "0")].join("-");
+  const matchingTasks = visibleTasks.filter((task) => {
+    const query = taskFilters.search.trim().toLowerCase();
+    return (!query || [task.title, task.description].some((value) => value.toLowerCase().includes(query)))
+      && (!taskFilters.project || task.projectId === taskFilters.project)
+      && (!taskFilters.status || task.status === taskFilters.status)
+      && (!taskFilters.priority || task.priority === taskFilters.priority)
+      && (!taskFilters.assignee || task.assigneeId === taskFilters.assignee)
+      && (!taskFilters.due
+        || (taskFilters.due === "overdue" && Boolean(task.dueDate) && task.dueDate! < todayKey && task.status !== "Completed")
+        || (taskFilters.due === "today" && task.dueDate === todayKey)
+        || (taskFilters.due === "upcoming" && Boolean(task.dueDate) && task.dueDate! > todayKey)
+        || (taskFilters.due === "none" && !task.dueDate));
+  });
+  // Keep ancestors of matching subtasks so the task hierarchy remains readable.
+  const boardTaskIds = new Set(matchingTasks.map((task) => task.id));
+  const taskById = new Map(visibleTasks.map((task) => [task.id, task]));
+  for (const task of matchingTasks) {
+    let parentId = task.parentId;
+    const visited = new Set<string>([task.id]);
+    while (parentId && !visited.has(parentId)) {
+      visited.add(parentId);
+      const parent = taskById.get(parentId);
+      if (!parent) break;
+      boardTaskIds.add(parent.id);
+      parentId = parent.parentId;
+    }
+  }
+  const boardTasks = visibleTasks.filter((task) => boardTaskIds.has(task.id));
+  const rootTasks = boardTasks.filter((task) => !task.parentId || !boardTaskIds.has(task.parentId));
+  const boardProjects = projects.filter((project) => (!taskFilters.project || project.id === taskFilters.project)
+    && (!filtersActive || boardTasks.some((task) => task.projectId === project.id)));
+  const setTaskFilter = (key: keyof typeof taskFilters, value: string) => setTaskFilters((filters) => ({ ...filters, [key]: value }));
   const reportRange = (() => {
     const start = new Date();
     start.setHours(0, 0, 0, 0);
@@ -1092,8 +1046,22 @@ export default function Home() {
           ? `${customReportStart} to ${customReportEnd}`
           : "the selected date range";
 
+  const chatTask = visibleTasks.find((task) => task.id === noteTaskId);
+  const chatTasks = visibleTasks.filter((task) => !chatProjectId || task.projectId === chatProjectId);
+  const chatNotes = notes.filter((note) => note.taskId === chatTask?.id).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const canSendChat = Boolean(chatTask && (currentUser.role === "Manager" || (isWorker(currentUser.role) && chatTask.assigneeId === currentUser.id) || (currentUser.role === "Senior Employee" && chatTask.createdById === currentUser.id)));
+  const navigationItems = [
+    "Dashboard",
+    ...(currentUser.role === "Admin" ? ["User management"] : []),
+    isWorker(currentUser.role) ? "My daily updates" : "Team tasks",
+    "Projects", "Archive", "Chats", "My profile",
+
+  ];
+  const selectedSection = navigationItems.some((item) => sectionTarget(item) === activeSection)
+    ? activeSection : "dashboard";
+
   return (
-    <main className="min-h-screen bg-[#f4f7fb] text-slate-900">
+    <main className="workspace-theme min-h-screen bg-background text-slate-900">
         <div className="flex min-h-screen flex-col xl:flex-row">
         <aside className="sticky top-0 hidden h-screen w-64 shrink-0 border-r border-slate-200/80 bg-white/90 p-4 backdrop-blur xl:block">
           <div className="flex items-center gap-3">
@@ -1108,15 +1076,8 @@ export default function Home() {
             <p className="mt-1 text-sm text-indigo-700">{currentUser.role}</p>
           </div>
           <nav className="mt-6 space-y-1">
-            {[
-              "Dashboard",
-              currentUser.role === "Admin" ? "User management" : currentUser.role === "Manager" ? "Team tasks" : "My daily updates",
-              "Projects",
-              "Archive",
-              "My profile",
-              ...(currentUser.role === "Employee" ? [] : ["Reports"]),
-            ].map((item) => (
-              <a key={item} href={`#${sectionTarget(item)}`} onClick={(event) => { event.preventDefault(); navigateTo(item); }} className="block w-full rounded-xl px-3 py-2.5 text-left text-sm font-medium text-slate-600 hover:bg-indigo-50 hover:text-indigo-700">{item}</a>
+            {navigationItems.map((item) => (
+              <a key={item} href={`#${sectionTarget(item)}`} onClick={(event) => { event.preventDefault(); navigateTo(item); }} aria-current={(item === "Chats" ? chatOpen : selectedSection === sectionTarget(item)) ? "page" : undefined} className={`block w-full rounded-xl px-3 py-2.5 text-left text-sm font-semibold transition-colors ${(item === "Chats" ? chatOpen : selectedSection === sectionTarget(item)) ? "bg-indigo-600 text-white shadow-sm" : "text-slate-600 hover:bg-indigo-50 hover:text-indigo-700"}`}>{item}</a>
             ))}
           </nav>
           <button
@@ -1125,6 +1086,7 @@ export default function Home() {
           >
             Sign out
           </button>
+          <ThemeToggle />
         </aside>
 
         <div className="border-b border-slate-200/80 bg-white/95 p-4 shadow-sm backdrop-blur xl:hidden">
@@ -1147,16 +1109,21 @@ export default function Home() {
             </button>
           </div>
           <nav className="mt-4 flex flex-wrap gap-2">
-            {["Dashboard", currentUser.role === "Admin" ? "User management" : currentUser.role === "Manager" ? "Team tasks" : "My daily updates", "Projects", "Archive", "My profile", ...(currentUser.role === "Employee" ? [] : ["Reports"])].map((item) => (
-              <a key={item} href={`#${sectionTarget(item)}`} onClick={(event) => { event.preventDefault(); navigateTo(item); }} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700">
+            {navigationItems.map((item) => (
+              <a key={item} href={`#${sectionTarget(item)}`} onClick={(event) => { event.preventDefault(); navigateTo(item); }} aria-current={(item === "Chats" ? chatOpen : selectedSection === sectionTarget(item)) ? "page" : undefined} className={`rounded-xl border px-3 py-2 text-xs font-semibold transition-colors ${(item === "Chats" ? chatOpen : selectedSection === sectionTarget(item)) ? "border-indigo-600 bg-indigo-600 text-white shadow-sm" : "border-slate-200 bg-slate-50 text-slate-700 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"}`}>
                 {item}
               </a>
             ))}
           </nav>
+          <ThemeToggle />
         </div>
 
         <section className="min-w-0 flex-1 overflow-x-hidden p-4 sm:p-6 md:p-8">
-          <div id="dashboard" className="mx-auto w-full max-w-7xl">
+          <div className="mx-auto w-full max-w-7xl">
+            {notice && (
+              <button onClick={() => setNotice("")} className="mb-6 w-full rounded-lg bg-emerald-50 px-4 py-3 text-left text-sm text-emerald-800">{notice} <span className="float-right">×</span></button>
+            )}
+            <div id="dashboard" hidden={selectedSection !== "dashboard"}>
             <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
               <div>
                 <p className="text-sm text-slate-500">Monday, August 9</p>
@@ -1178,14 +1145,10 @@ export default function Home() {
                   </>
                 )}
                 {currentUser.role === "Manager" && (
-                  <button onClick={() => setModal("task")} className="rounded-lg bg-indigo-600 px-4 py-3 text-sm font-semibold text-white hover:bg-indigo-700">+ Create task</button>
+                  <button onClick={() => openTaskForm()} className="rounded-lg bg-indigo-600 px-4 py-3 text-sm font-semibold text-white hover:bg-indigo-700">+ Create task</button>
                 )}
               </div>
             </div>
-
-            {notice && (
-              <button onClick={() => setNotice("")} className="mt-6 w-full rounded-lg bg-emerald-50 px-4 py-3 text-left text-sm text-emerald-800">{notice} <span className="float-right">×</span></button>
-            )}
 
             <div className="mt-8 grid gap-4 sm:grid-cols-2 2xl:grid-cols-5">
               <div className="rounded-xl bg-white p-5 shadow-sm"><p className="text-sm text-slate-500">Projects</p><p className="mt-2 text-3xl font-bold text-indigo-600">{projects.length}</p></div>
@@ -1195,7 +1158,9 @@ export default function Home() {
               <div className="rounded-xl bg-white p-5 shadow-sm"><p className="text-sm text-slate-500">Average progress</p><p className="mt-2 text-3xl font-bold text-indigo-600">{averageProgress}%</p></div>
             </div>
 
-            <div id="profile" className="mt-8 rounded-xl bg-white p-6 shadow-sm">
+            </div>
+
+            <div id="profile" hidden={selectedSection !== "profile"} className="rounded-xl bg-white p-6 shadow-sm">
               <div>
                 <h3 className="text-xl font-bold">My profile</h3>
                 <p className="mt-1 text-sm text-slate-500">Update your display name or change your password. Your role and permissions are managed by an administrator.</p>
@@ -1224,68 +1189,49 @@ export default function Home() {
             </div>
 
             {currentUser.role === "Admin" && (
-              <div id="user-management" className="mt-8 rounded-xl bg-white p-6 shadow-sm">
+              <div id="user-management" hidden={selectedSection !== "user-management"} className="rounded-xl bg-white p-6 shadow-sm">
                 <div className="flex items-center justify-between"><div><h3 className="text-xl font-bold">User management</h3><p className="mt-1 text-sm text-slate-500">Create users and manage access roles.</p></div><button onClick={() => setModal("user")} className="rounded-lg bg-slate-100 px-4 py-2 text-sm font-semibold text-indigo-600">+ Add user</button></div>
-                <div className="mt-5 hidden overflow-x-auto xl:block"><table className="w-full text-left text-sm"><thead className="border-b text-xs uppercase text-slate-400"><tr><th className="pb-3">User</th><th className="pb-3">Email</th><th className="pb-3">Role</th><th className="pb-3">Status</th><th className="pb-3">Action</th></tr></thead><tbody>{users.map((user) => <tr key={user.id} className="border-b last:border-0"><td className="py-4 font-semibold">{user.name}</td><td className="py-4 text-slate-500">{user.email}</td><td className="py-4"><select value={user.role} onChange={(event) => updateUserRole(user.id, event.target.value as Role)} className="rounded-lg border px-3 py-2"><option>Admin</option><option>Manager</option><option>Employee</option></select></td><td className="py-4"><span className={`rounded-full px-2 py-1 text-xs ${user.active ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"}`}>{user.active ? "Active" : "Inactive"}</span></td><td className="py-4"><button onClick={() => toggleUser(user.id)} className="text-sm font-semibold text-indigo-600">{user.active ? "Deactivate" : "Activate"}</button></td></tr>)}</tbody></table></div>
-                <div className="mt-5 space-y-3 xl:hidden">{users.map((user) => <div key={user.id} className="rounded-xl border border-slate-200 p-4"><div className="flex items-start justify-between gap-3"><div><p className="font-semibold">{user.name}</p><p className="mt-1 break-all text-sm text-slate-500">{user.email}</p></div><span className={`rounded-full px-2 py-1 text-xs ${user.active ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"}`}>{user.active ? "Active" : "Inactive"}</span></div><div className="mt-4 grid grid-cols-2 gap-3"><label className="text-xs font-medium text-slate-500">Role<select value={user.role} onChange={(event) => updateUserRole(user.id, event.target.value as Role)} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm text-slate-700"><option>Admin</option><option>Manager</option><option>Employee</option></select></label><button onClick={() => toggleUser(user.id)} className="self-end rounded-lg bg-slate-100 px-3 py-2 text-sm font-semibold text-indigo-600">{user.active ? "Deactivate" : "Activate"}</button></div></div>)}</div>
+                <div className="mt-5 hidden overflow-x-auto xl:block"><table className="w-full text-left text-sm"><thead className="border-b text-xs uppercase text-slate-400"><tr><th className="pb-3">User</th><th className="pb-3">Email</th><th className="pb-3">Role</th><th className="pb-3">Status</th><th className="pb-3">Action</th></tr></thead><tbody>{users.map((user) => <tr key={user.id} className="border-b last:border-0"><td className="py-4 font-semibold">{user.name}</td><td className="py-4 text-slate-500">{user.email}</td><td className="py-4"><select value={user.role} onChange={(event) => updateUserRole(user.id, event.target.value as Role)} className="rounded-lg border px-3 py-2"><option>Admin</option><option>Manager</option><option>Senior Employee</option><option>Employee</option></select></td><td className="py-4"><span className={`rounded-full px-2 py-1 text-xs ${user.active ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"}`}>{user.active ? "Active" : "Inactive"}</span></td><td className="py-4"><button onClick={() => toggleUser(user.id)} className="text-sm font-semibold text-indigo-600">{user.active ? "Deactivate" : "Activate"}</button></td></tr>)}</tbody></table></div>
+                <div className="mt-5 space-y-3 xl:hidden">{users.map((user) => <div key={user.id} className="rounded-xl border border-slate-200 p-4"><div className="flex items-start justify-between gap-3"><div><p className="font-semibold">{user.name}</p><p className="mt-1 break-all text-sm text-slate-500">{user.email}</p></div><span className={`rounded-full px-2 py-1 text-xs ${user.active ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"}`}>{user.active ? "Active" : "Inactive"}</span></div><div className="mt-4 grid grid-cols-2 gap-3"><label className="text-xs font-medium text-slate-500">Role<select value={user.role} onChange={(event) => updateUserRole(user.id, event.target.value as Role)} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm text-slate-700"><option>Admin</option><option>Manager</option><option>Senior Employee</option><option>Employee</option></select></label><button onClick={() => toggleUser(user.id)} className="self-end rounded-lg bg-slate-100 px-3 py-2 text-sm font-semibold text-indigo-600">{user.active ? "Deactivate" : "Activate"}</button></div></div>)}</div>
               </div>
             )}
 
-            <div id="projects" className="mt-8 rounded-xl bg-white p-6 shadow-sm">
+            <div id="projects" hidden={selectedSection !== "projects"} className="rounded-xl bg-white p-6 shadow-sm">
               <div className="flex items-center justify-between"><div><h3 className="text-xl font-bold">Projects <span className="text-base font-medium text-slate-400">({projects.length})</span></h3><p className="mt-1 text-sm text-slate-500">{currentUser.role === "Admin" ? "Admin controls project creation." : "Projects connected to your tasks."}</p></div>{currentUser.role === "Admin" && <button onClick={() => setModal("project")} className="rounded-lg bg-slate-100 px-4 py-2 text-sm font-semibold text-indigo-600">+ Add project</button>}</div>
-              <div className="mt-5 grid gap-4 sm:grid-cols-2 2xl:grid-cols-3">{projects.map((project) => { const projectTasks = tasks.filter((task) => task.projectId === project.id); const subtaskCount = projectTasks.filter((task) => task.parentId).length; const projectStatus = getProjectStatus(project.id); return <div key={project.id} className="rounded-lg border border-slate-200 p-4"><div className="flex items-start justify-between gap-3"><p className="break-words font-semibold">{project.name}</p><span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${projectStatusClass(projectStatus)}`}>{projectStatus}</span></div><p className="mt-2 text-sm text-slate-500">{project.description}</p><p className="mt-3 text-xs text-indigo-600">{projectTasks.length} tasks · {subtaskCount} subtasks</p></div>; })}</div>
+              <div className="mt-5 grid gap-4 sm:grid-cols-2 2xl:grid-cols-3">{projects.map((project) => { const projectTasks = tasks.filter((task) => task.projectId === project.id); const subtaskCount = projectTasks.filter((task) => task.parentId).length; const projectStatus = getProjectStatus(project.id); return <button type="button" key={project.id} onClick={() => openProjectTasks(project.id)} aria-label={`Open tasks for ${project.name}`} className="rounded-lg border border-slate-200 p-4 text-left transition hover:border-indigo-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500"><span className="flex items-start justify-between gap-3"><span className="block break-words font-semibold">{project.name}</span><span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${projectStatusClass(projectStatus)}`}>{projectStatus}</span></span><span className="block mt-2 text-sm text-slate-500">{project.description}</span><span className="block mt-3 text-xs text-indigo-600">{projectTasks.length} tasks · {subtaskCount} subtasks</span></button>; })}</div>
             </div>
 
-            <div id="tasks" className="mt-8 rounded-xl bg-slate-100 p-6">
-              <div className="flex items-center justify-between"><div><h3 className="text-xl font-bold">{currentUser.role === "Employee" ? "My daily updates" : "Team task board"}</h3><p className="mt-1 text-sm text-slate-500">{currentUser.role === "Manager" ? "Create tasks, subtasks, messages, and assignments for employees." : currentUser.role === "Employee" ? "Update your daily description, progress, and messages." : "View all work across the workspace."}</p></div>{currentUser.role === "Manager" && <button onClick={() => setModal("task")} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white">+ New task</button>}</div>
-              <div className="mt-5 rounded-xl border border-slate-200 bg-white">
-                <table className="w-full table-fixed text-center text-sm">
-                  <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-                    <tr>
-                      <th className="px-3 py-3">Task / Subtask</th>
-                      <th className="px-3 py-3">Status</th>
-                      <th className="px-3 py-3">Priority</th>
-                      <th className="px-3 py-3">Progress</th>
-                      <th className="px-3 py-3">Assigned date</th>
-                      <th className="px-3 py-3">Due date</th>
-                      <th className="px-3 py-3">Days from assigned</th>
-                      <th className="px-3 py-3">Assigned to</th>
-                      <th className="px-3 py-3">Assigned by</th>
-                      <th className="px-3 py-3">Created</th>
-                      <th className="px-3 py-3">Completed date</th>
-                      <th className="px-3 py-3">Actions</th>
-                    </tr>
-                  </thead>
-                  {projects.map((project) => {
-                    const projectRootTasks = sortTasksNewestFirst(rootTasks.filter((task) => task.projectId === project.id), true);
-                    const projectTaskCount = visibleTasks.filter((task) => task.projectId === project.id).length;
-                    return (
-                      <tbody key={project.id}>
-                        <tr className="border-t border-slate-200 bg-indigo-50/60">
-                          <td colSpan={12} className="px-3 py-3">
-                            <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                              <span className="font-bold text-indigo-900">Project: {project.name}</span>
-                              <span className="text-xs text-indigo-700">{projectTaskCount} items · newest task or subtask first</span>
-                            </div>
-                            <p className="mt-1 text-xs text-slate-500">{project.description}</p>
-                          </td>
-                        </tr>
-                        {projectRootTasks.length ? projectRootTasks.flatMap((task) => renderTaskRow(task)) : (
-                          <tr>
-                            <td colSpan={12} className="px-3 py-5 text-center text-sm text-slate-500">No tasks in this project yet.</td>
-                          </tr>
-                        )}
-                      </tbody>
-                    );
-                  })}
-                  {projects.length === 0 && (
-                    <tbody><tr><td colSpan={12} className="px-3 py-6 text-center text-slate-500">No projects available.</td></tr></tbody>
-                  )}
-                </table>
+            <div id="tasks" hidden={selectedSection !== "tasks"} className="rounded-xl bg-slate-100 p-6">
+              <div className="flex items-center justify-between"><div><h3 className="text-xl font-bold">{isWorker(currentUser.role) ? "My daily updates" : "Team task board"}</h3><p className="mt-1 text-sm text-slate-500">{currentUser.role === "Manager" ? "Create tasks, subtasks, messages, and assignments for employees." : isWorker(currentUser.role) ? "Update your daily progress and messages. Senior employees can delegate subtasks." : "View all work across the workspace."}</p></div>{currentUser.role === "Manager" && <button onClick={() => openTaskForm()} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white">+ New task</button>}</div>
+              <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <label className="text-xs font-semibold text-slate-600">Search tasks<input type="search" value={taskFilters.search} onChange={(event) => setTaskFilter("search", event.target.value)} placeholder="Title or description" className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal" /></label>
+                {([
+                  ["project", "Project", projects.map((project) => [project.id, project.name])],
+                  ["status", "Status", ["Not started", "In progress", "Completed"].map((value) => [value, value])],
+                  ["priority", "Priority", ["High", "Medium", "Low"].map((value) => [value, value])],
+                  ["assignee", "Assignee", users.filter((user) => visibleTasks.some((task) => task.assigneeId === user.id)).map((user) => [user.id, user.name])],
+                  ["due", "Due date", [["overdue", "Overdue"], ["today", "Due today"], ["upcoming", "Upcoming"], ["none", "No due date"]]],
+                ] as const).map(([key, label, options]) => (
+                  <label key={key} className="text-xs font-semibold text-slate-600">{label}<select value={taskFilters[key]} onChange={(event) => setTaskFilter(key, event.target.value)} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal"><option value="">All</option>{options.map(([value, text]) => <option key={value} value={value}>{text}</option>)}</select></label>
+                ))}
+              </div>
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+                <p>{matchingTasks.length} of {visibleTasks.length} tasks/subtasks{boardTasks.length > matchingTasks.length ? " · Parent tasks included for context" : ""}</p>
+                {filtersActive && <button type="button" onClick={() => setTaskFilters({ search: "", project: "", status: "", priority: "", assignee: "", due: "" })} className="font-semibold text-indigo-600 hover:text-indigo-800">Clear filters</button>}
+              </div>
+              <div className="mt-5 space-y-6">
+                {boardProjects.map((project) => (
+                  <div key={project.id} className="space-y-3">
+                    <div className="flex flex-wrap items-baseline justify-between gap-2 px-1"><h4 className="font-bold text-indigo-950">{project.name}</h4><span className="text-xs text-slate-500">{boardTasks.filter((task) => task.projectId === project.id).length} tasks / subtasks</span></div>
+                    {sortTasksNewestFirst(rootTasks.filter((task) => task.projectId === project.id), true).map((task) => renderTask(task))}
+                    {!boardTasks.some((task) => task.projectId === project.id) && <p className="rounded-xl border border-dashed border-slate-200 p-5 text-sm text-slate-500">No tasks in this project yet.</p>}
+                  </div>
+                ))}
+                {!boardProjects.length && <p className="rounded-xl bg-white p-6 text-center text-sm text-slate-500">No tasks match these filters.</p>}
               </div>
             </div>
 
-            <div id="archive" className="mt-8 rounded-xl bg-white p-6 shadow-sm">
+            <div id="archive" hidden={selectedSection !== "archive"} className="rounded-xl bg-white p-6 shadow-sm">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <h3 className="text-xl font-bold">Archive <span className="text-base font-medium text-slate-400">({archivedTasks.length})</span></h3>
@@ -1332,8 +1278,8 @@ export default function Home() {
               ))}
             </div>
 
-            {currentUser.role !== "Employee" && (
-            <div id="reports" className="mt-8 rounded-xl bg-white p-6 shadow-sm">
+            {!isWorker(currentUser.role) && (
+            <div id="reports" hidden={selectedSection !== "dashboard"} className="mt-8 rounded-xl bg-white p-6 shadow-sm">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div>
                   <h3 className="text-xl font-bold">Reports</h3>
@@ -1443,16 +1389,43 @@ export default function Home() {
         </section>
       </div>
 
+      {selectedTaskId && visibleTasks.some((task) => task.id === selectedTaskId) && <TaskDetailsPanel onClose={() => setSelectedTaskId(null)}>{notice && <p role="status" className="mb-4 rounded-lg bg-indigo-50 p-3 text-sm text-indigo-700">{notice}</p>}{renderTask(visibleTasks.find((task) => task.id === selectedTaskId)!, 0, true)}</TaskDetailsPanel>}
+
+      {chatOpen && (
+        <aside role="dialog" aria-label="Task chats" className="fixed bottom-3 right-3 z-30 flex h-[min(640px,85dvh)] w-[calc(100vw-24px)] flex-col overflow-hidden rounded-2xl border border-indigo-100 bg-white shadow-2xl sm:bottom-5 sm:right-5 sm:w-[400px]">
+          <div className="flex items-center justify-between bg-indigo-600 px-4 py-3 text-white"><div><h2 className="font-bold">Task chats</h2><p className="text-xs text-indigo-100">Keep the conversation with the work</p></div><button aria-label="Close chat" onClick={() => setChatOpen(false)} className="rounded-lg px-3 py-1 text-xl hover:bg-indigo-500">×</button></div>
+          <div className="grid gap-2 border-b border-slate-100 p-3">
+            <label className="text-xs font-semibold text-slate-500">Project<select disabled={sendingMessage} value={chatProjectId} onChange={(event) => { setChatProjectId(event.target.value); setNoteTaskId(null); setNoteText(""); setChatError(""); }} className="mt-1 w-full rounded-lg border border-slate-200 p-2 text-sm text-slate-800"><option value="">All projects</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>
+            <label className="text-xs font-semibold text-slate-500">Task<select disabled={sendingMessage} value={chatTask?.id ?? ""} onChange={(event) => event.target.value ? toggleMessages(event.target.value) : setNoteTaskId(null)} className="mt-1 w-full rounded-lg border border-slate-200 p-2 text-sm text-slate-800"><option value="">Select a task</option>{chatTasks.map((task) => <option key={task.id} value={task.id}>{task.parentId ? "↳ " : ""}{task.title}</option>)}</select></label>
+          </div>
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-slate-50 p-4" aria-live="polite">
+            {chatTask && <p className="break-words text-center text-xs font-semibold text-slate-500">{chatTask.title}</p>}
+            {!chatTask ? <p className="py-10 text-center text-sm text-slate-500">Select a project and task to open a conversation.</p> : !chatNotes.length ? <p className="py-10 text-center text-sm text-slate-500">No messages yet. Start the conversation.</p> : chatNotes.map((note) => (
+              <div key={note.id} className={note.authorId === currentUser.id ? "ml-8 text-right" : "mr-8"}>
+                <p className="mb-1 text-[11px] font-semibold text-slate-500">{note.authorId === currentUser.id ? "You" : getUserName(note.authorId)}</p>
+                <p className={note.authorId === currentUser.id ? "inline-block max-w-full whitespace-pre-wrap break-words rounded-2xl rounded-br-sm bg-indigo-600 px-3 py-2 text-left text-sm text-white" : "inline-block max-w-full whitespace-pre-wrap break-words rounded-2xl rounded-bl-sm border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"}>{note.text}</p>
+                <p className="mt-1 text-[10px] text-slate-400">{formatTimestamp(note.createdAt)}</p>
+              </div>
+            ))}<div ref={chatEndRef} />
+          </div>
+          {chatError && <p role="alert" className="px-3 pt-2 text-xs text-red-600">{chatError}</p>}
+          <form onSubmit={(event) => { event.preventDefault(); if (chatTask) void addNote(chatTask.id); }} className="flex items-end gap-2 border-t border-slate-100 p-3">
+            <textarea aria-label="Message" disabled={!canSendChat || sendingMessage} maxLength={5000} rows={2} value={noteText} onChange={(event) => setNoteText(event.target.value)} placeholder={chatTask && !canSendChat ? "Read-only conversation" : "Write a message…"} className="min-w-0 flex-1 resize-none rounded-xl border border-slate-200 p-2 text-sm disabled:bg-slate-50" />
+            <button disabled={!canSendChat || sendingMessage || !noteText.trim()} className="rounded-xl bg-indigo-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-40">{sendingMessage ? "Sending…" : "Send"}</button>
+          </form>
+        </aside>
+      )}
+
       {modal === "user" && currentUser.role === "Admin" && (
-        <div className="fixed inset-0 z-20 flex items-center justify-center bg-slate-900/40 p-4"><div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl"><div className="flex items-center justify-between"><div><h2 className="text-xl font-bold">Create new user</h2><p className="mt-1 text-sm text-slate-500">Assign a role and login credentials.</p></div><button onClick={() => setModal(null)} className="text-xl text-slate-400">×</button></div><form onSubmit={createUser} className="mt-6 space-y-4"><input value={newUserName} onChange={(event) => setNewUserName(event.target.value)} placeholder="Full name" className="w-full rounded-lg border px-4 py-3" /><input value={newUserEmail} onChange={(event) => setNewUserEmail(event.target.value)} type="email" placeholder="Email address" className="w-full rounded-lg border px-4 py-3" /><input value={newUserPassword} onChange={(event) => setNewUserPassword(event.target.value)} type="text" placeholder="Temporary password" className="w-full rounded-lg border px-4 py-3" /><select value={newUserRole} onChange={(event) => setNewUserRole(event.target.value as Role)} className="w-full rounded-lg border px-4 py-3"><option>Admin</option><option>Manager</option><option>Employee</option></select><button className="w-full rounded-lg bg-indigo-600 px-4 py-3 font-semibold text-white">Create user</button></form></div></div>
+        <div className="fixed inset-0 z-20 flex items-center justify-center bg-slate-900/40 p-4"><div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl"><div className="flex items-center justify-between"><div><h2 className="text-xl font-bold">Create new user</h2><p className="mt-1 text-sm text-slate-500">Assign a role and login credentials.</p></div><button onClick={() => setModal(null)} className="text-xl text-slate-400">×</button></div><form onSubmit={createUser} className="mt-6 space-y-4"><input value={newUserName} onChange={(event) => setNewUserName(event.target.value)} placeholder="Full name" className="w-full rounded-lg border px-4 py-3" /><input value={newUserEmail} onChange={(event) => setNewUserEmail(event.target.value)} type="email" placeholder="Email address" className="w-full rounded-lg border px-4 py-3" /><input value={newUserPassword} onChange={(event) => setNewUserPassword(event.target.value)} type="text" placeholder="Temporary password" className="w-full rounded-lg border px-4 py-3" /><select value={newUserRole} onChange={(event) => setNewUserRole(event.target.value as Role)} className="w-full rounded-lg border px-4 py-3"><option>Admin</option><option>Manager</option><option>Senior Employee</option><option>Employee</option></select><button className="w-full rounded-lg bg-indigo-600 px-4 py-3 font-semibold text-white">Create user</button></form></div></div>
       )}
 
       {modal === "project" && currentUser.role === "Admin" && (
         <div className="fixed inset-0 z-20 flex items-center justify-center bg-slate-900/40 p-4"><div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl"><div className="flex items-center justify-between"><div><h2 className="text-xl font-bold">Create new project</h2><p className="mt-1 text-sm text-slate-500">Admin-only project creation.</p></div><button onClick={() => setModal(null)} className="text-xl text-slate-400">×</button></div><form onSubmit={createProject} className="mt-6 space-y-4"><input autoFocus value={newProjectName} onChange={(event) => setNewProjectName(event.target.value)} placeholder="Project name" className="w-full rounded-lg border px-4 py-3" /><textarea value={newProjectDescription} onChange={(event) => setNewProjectDescription(event.target.value)} placeholder="Project description" rows={3} className="w-full resize-none rounded-lg border px-4 py-3" /><button className="w-full rounded-lg bg-indigo-600 px-4 py-3 font-semibold text-white">Create project</button></form></div></div>
       )}
 
-      {modal === "task" && currentUser.role === "Manager" && (
-        <div className="fixed inset-0 z-20 flex items-center justify-center overflow-y-auto bg-slate-900/40 p-4"><div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl"><div className="flex items-center justify-between"><div><h2 className="text-xl font-bold">Create task or subtask</h2><p className="mt-1 text-sm text-slate-500">Managers can assign work to employees.</p></div><button onClick={() => setModal(null)} className="text-xl text-slate-400">×</button></div><form onSubmit={createTask} className="mt-6 space-y-4"><input autoFocus value={newTaskTitle} onChange={(event) => setNewTaskTitle(event.target.value)} placeholder="Task title" className="w-full rounded-lg border px-4 py-3" /><textarea value={newTaskDescription} onChange={(event) => setNewTaskDescription(event.target.value)} placeholder="Task description" rows={3} className="w-full resize-none rounded-lg border px-4 py-3" /><div className="grid gap-4 md:grid-cols-2"><select value={newTaskProjectId || projects[0]?.id} onChange={(event) => setNewTaskProjectId(event.target.value)} className="rounded-lg border px-4 py-3">{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select><select value={newTaskAssigneeId || employees[0]?.id} onChange={(event) => setNewTaskAssigneeId(event.target.value)} className="rounded-lg border px-4 py-3">{employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.name}</option>)}</select><select value={newTaskParentId} onChange={(event) => setNewTaskParentId(event.target.value)} className="rounded-lg border px-4 py-3"><option value="">Top-level task</option>{tasks.filter((task) => !task.parentId).map((task) => <option key={task.id} value={task.id}>Subtask of: {task.title}</option>)}</select><select value={newTaskPriority} onChange={(event) => setNewTaskPriority(event.target.value as Task["priority"])} className="rounded-lg border px-4 py-3"><option>High</option><option>Medium</option><option>Low</option></select></div><label className="block text-sm font-semibold text-slate-700">Due date<input type="date" value={newTaskDue} onChange={(event) => setNewTaskDue(event.target.value)} className="mt-1 w-full rounded-lg border px-4 py-3 font-normal" /></label><button className="w-full rounded-lg bg-indigo-600 px-4 py-3 font-semibold text-white">Create and assign task</button></form></div></div>
+      {modal === "task" && ["Admin", "Manager", "Senior Employee"].includes(currentUser.role) && (
+        <div className="fixed inset-0 z-20 flex items-center justify-center overflow-y-auto bg-slate-900/40 p-4"><div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl"><div className="flex items-center justify-between"><div><h2 className="text-xl font-bold">{editingTaskId ? "Edit task" : "Create task or subtask"}</h2><p className="mt-1 text-sm text-slate-500">Assign work to a team member. Senior employees can assign subtasks to employees.</p></div><button onClick={() => setModal(null)} className="text-xl text-slate-400">×</button></div><form onSubmit={createTask} className="mt-6 space-y-4">{taskFormError && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{taskFormError}</p>}<input autoFocus value={newTaskTitle} onChange={(event) => setNewTaskTitle(event.target.value)} placeholder="Task title" className="w-full rounded-lg border px-4 py-3" /><textarea value={newTaskDescription} onChange={(event) => setNewTaskDescription(event.target.value)} placeholder="Task description" rows={3} className="w-full resize-none rounded-lg border px-4 py-3" /><div className="grid gap-4 md:grid-cols-2"><select aria-label="Task project" disabled={Boolean(editingTaskId) || currentUser.role === "Senior Employee"} value={newTaskProjectId || projects[0]?.id} onChange={(event) => { setNewTaskProjectId(event.target.value); setNewTaskParentId(""); }} className="rounded-lg border px-4 py-3">{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select><select aria-label="Assign to" value={newTaskAssigneeId || employees[0]?.id} onChange={(event) => setNewTaskAssigneeId(event.target.value)} className="rounded-lg border px-4 py-3">{employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.name}</option>)}</select><select aria-label="Parent task" disabled={Boolean(editingTaskId) || currentUser.role === "Senior Employee"} value={newTaskParentId} onChange={(event) => setNewTaskParentId(event.target.value)} className="rounded-lg border px-4 py-3"><option value="">Top-level task</option>{tasks.filter((task) => (currentUser.role === "Senior Employee" ? task.assigneeId === currentUser.id : !task.parentId) && task.projectId === (newTaskProjectId || projects[0]?.id)).map((task) => <option key={task.id} value={task.id}>Subtask of: {task.title}</option>)}</select><select value={newTaskPriority} onChange={(event) => setNewTaskPriority(event.target.value as Task["priority"])} className="rounded-lg border px-4 py-3"><option>High</option><option>Medium</option><option>Low</option></select></div><label className="block text-sm font-semibold text-slate-700">Start date<input required type="date" value={newTaskStart} onChange={(event) => { setNewTaskStart(event.target.value); if (event.target.value > newTaskDue) setNewTaskDue(event.target.value); }} className="mt-1 w-full rounded-lg border px-4 py-3 font-normal" /></label><label className="block text-sm font-semibold text-slate-700">Due date<input required min={newTaskStart} type="date" value={newTaskDue} onChange={(event) => setNewTaskDue(event.target.value)} className="mt-1 w-full rounded-lg border px-4 py-3 font-normal" /></label>{employees.length === 0 && <p className="text-sm text-amber-700">No eligible employees are available. Ask an admin to create an Employee account.</p>}<button disabled={employees.length === 0 || savingTask} className="w-full rounded-lg bg-indigo-600 px-4 py-3 font-semibold text-white disabled:opacity-40">{savingTask ? "Saving…" : editingTaskId ? "Save changes" : "Create and assign task"}</button></form></div></div>
       )}
     </main>
   );

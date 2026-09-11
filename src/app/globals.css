@@ -44,3 +44,53 @@ button:not(:disabled):active {
   background: #c7d2fe;
   color: #1e1b4b;
 }
+
+/* Dark palette shared by workspace cards, forms, navigation and floating chats. */
+html[data-theme="dark"] {
+  --background: #0b1120;
+  --foreground: #e2e8f0;
+  color-scheme: dark;
+}
+html[data-theme="dark"] body { background: var(--background); }
+html[data-theme="dark"] .workspace-theme {
+  --color-slate-50: #172033;
+  --color-slate-100: #1e293b;
+  --color-slate-200: #334155;
+  --color-slate-300: #475569;
+  --color-slate-400: #94a3b8;
+  --color-slate-500: #a7b5ca;
+  --color-slate-600: #cbd5e1;
+  --color-slate-700: #d8e2ef;
+  --color-slate-800: #e2e8f0;
+  --color-slate-900: #f1f5f9;
+  --color-slate-950: #f8fafc;
+  --color-indigo-50: #202442;
+  --color-indigo-100: #30345b;
+  --color-indigo-200: #434775;
+  --color-indigo-600: #818cf8;
+  --color-indigo-700: #a5b4fc;
+  --color-indigo-900: #c7d2fe;
+  --color-indigo-950: #e0e7ff;
+  --color-amber-50: #302718;
+  --color-amber-100: #43351e;
+  --color-amber-200: #65502a;
+  --color-amber-700: #fcd34d;
+  --color-amber-800: #fde68a;
+  --color-emerald-50: #132e28;
+  --color-emerald-100: #204439;
+  --color-emerald-700: #6ee7b7;
+  --color-emerald-800: #a7f3d0;
+  --color-emerald-950: #d1fae5;
+  --color-green-50: #17372b;
+  --color-green-700: #86efac;
+  --color-red-50: #3b1d29;
+  --color-red-700: #fda4af;
+  --color-violet-50: #29203f;
+  --color-violet-700: #c4b5fd;
+}
+html[data-theme="dark"] .workspace-theme :is(.bg-white, .bg-white\/90, .bg-white\/95) { background-color: #111b2d; }
+html[data-theme="dark"] .workspace-theme :is(input, textarea, select) { background-color: #111b2d; color: #e2e8f0; border-color: #334155; }
+html[data-theme="dark"] .workspace-theme :is(.bg-indigo-600, .bg-slate-900) { background-color: #4f46e5; }
+html[data-theme="dark"] .workspace-theme .hover\:bg-indigo-700:hover { background-color: #4338ca; }
+html[data-theme="dark"] .workspace-theme .to-white { --tw-gradient-to: #111b2d; }
+html[data-theme="dark"] .workspace-theme img { background-color: white; }
