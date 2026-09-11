@@ -1,0 +1,11 @@
+"use client";
+import { useState } from 'react';
+type Filters={search:string;project:string;status:string;priority:string;assignee:string;due:string};
+type Saved={name:string;filters:Filters};
+export default function SavedFilters({userId,filters,onSelect}:{userId:string;filters:Filters;onSelect:(value:Filters)=>void}){
+ const key=`mellivo-filters-${userId}`;
+ const [saved,setSaved]=useState<Saved[]>(()=>{try{const parsed=JSON.parse(localStorage.getItem(key)||'[]');return Array.isArray(parsed)?parsed.filter(item=>typeof item.name==='string'&&item.filters&&Object.keys(filters).every(k=>typeof item.filters[k]==='string')).slice(0,20):[];}catch{return [];}});
+ const [name,setName]=useState('');const [error,setError]=useState('');
+ const persist=(next:Saved[])=>{try{localStorage.setItem(key,JSON.stringify(next));setSaved(next);setError('');}catch{setError('Your browser could not save this filter.');}};
+ return <div className="my-4 space-y-2"><div className="flex flex-wrap gap-2"><label className="text-sm text-slate-600">Saved view <select aria-label="Saved view" value="" onChange={e=>{const item=saved.find(s=>s.name===e.target.value);if(item)onSelect(item.filters);}} className="rounded-lg border border-slate-200 p-2"><option value="">Choose…</option>{saved.map(s=><option key={s.name}>{s.name}</option>)}</select></label><input aria-label="New saved view name" maxLength={60} value={name} onChange={e=>setName(e.target.value)} placeholder="Name this view" className="rounded-lg border border-slate-200 p-2 text-sm"/><button disabled={!name.trim()||saved.length>=20&&!saved.some(s=>s.name===name.trim())} onClick={()=>{persist([...saved.filter(s=>s.name!==name.trim()),{name:name.trim(),filters:{...filters}}]);setName('');}} className="rounded-lg bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-700 disabled:opacity-50">Save filters</button></div>{saved.length>0&&<details className="text-xs text-slate-500"><summary className="cursor-pointer">Manage saved views · this browser only</summary>{saved.map(s=><div key={s.name} className="mt-2 flex gap-3"><span>{s.name}</span><button onClick={()=>persist(saved.filter(item=>item.name!==s.name))} aria-label={`Delete saved view ${s.name}`}>Remove</button></div>)}</details>}{error&&<p role="alert">{error}</p>}</div>;
+}

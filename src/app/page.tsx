@@ -3,6 +3,13 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import TaskDetailsPanel from "@/components/task-details-panel";
+import NotificationCenter from "@/components/notification-center";
+import { buildNotifications } from "@/lib/notifications";
+import ActivityHistory from "@/components/activity-history";
+import SavedFilters from "@/components/saved-filters";
+import WorkOverview from "@/components/work-overview";
+import { downloadCsv } from "@/lib/report-export";
+import TaskAttachments from "@/components/task-attachments";
 import ThemeToggle from "@/components/theme-toggle";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase/browser";
 
@@ -126,7 +133,7 @@ export default function Home() {
 
   const [newUserName, setNewUserName] = useState("");
   const [newUserEmail, setNewUserEmail] = useState("");
-  const [newUserPassword, setNewUserPassword] = useState("");
+  const [invitingUser, setInvitingUser] = useState(false);
   const [newUserRole, setNewUserRole] = useState<Role>("Employee");
 
   const [newProjectName, setNewProjectName] = useState("");
@@ -399,6 +406,10 @@ export default function Home() {
       Projects: "projects",
       Archive: "archive",
       Chats: "chats",
+      Notifications: "notifications",
+      Activity: "activity",
+      "My Work": "my-work",
+      Workload: "workload",
 
       "My profile": "profile",
     };
@@ -440,19 +451,20 @@ export default function Home() {
 
   const createUser = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!newUserName.trim() || !newUserEmail.trim() || !newUserPassword.trim()) return;
+    if (!newUserName.trim() || !newUserEmail.trim() || invitingUser) return;
     try {
-      await apiRequest("create_user", { name: newUserName, email: newUserEmail, password: newUserPassword, role: newUserRole });
+      setInvitingUser(true);
+      await apiRequest("invite_user", { name: newUserName, email: newUserEmail, role: newUserRole });
       await loadWorkspace();
       setNewUserName("");
       setNewUserEmail("");
-      setNewUserPassword("");
+
       setNewUserRole("Employee");
       setModal(null);
-      setNotice("User created successfully.");
+      setNotice("Invitation sent. The user will choose their own password.");
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Unable to create user.");
-    }
+      setNotice(error instanceof Error ? error.message : "Unable to invite user.");
+    } finally { setInvitingUser(false); }
   };
 
   const updateUserRole = async (userId: string, role: Role) => {
@@ -952,7 +964,7 @@ export default function Home() {
                 />
               </label>
               {loginError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{loginError}</p>}
-              <button className="w-full rounded-xl bg-indigo-600 px-4 py-3.5 font-semibold text-white shadow-lg shadow-indigo-200 hover:bg-indigo-700">Sign in to Mellivo</button>
+              <button className="w-full rounded-xl bg-indigo-600 px-4 py-3.5 font-semibold text-white shadow-lg shadow-indigo-200 hover:bg-indigo-700">Sign in to Mellivo</button><a href="/auth/forgot-password" className="block text-center text-sm font-semibold text-indigo-600">Forgot password?</a>
             </form>
           </div>
         </div>
@@ -1050,11 +1062,13 @@ export default function Home() {
   const chatTasks = visibleTasks.filter((task) => !chatProjectId || task.projectId === chatProjectId);
   const chatNotes = notes.filter((note) => note.taskId === chatTask?.id).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   const canSendChat = Boolean(chatTask && (currentUser.role === "Manager" || (isWorker(currentUser.role) && chatTask.assigneeId === currentUser.id) || (currentUser.role === "Senior Employee" && chatTask.createdById === currentUser.id)));
+  const notifications = buildNotifications(visibleTasks, notes, currentUser, new Date(now));
   const navigationItems = [
-    "Dashboard",
+    "Dashboard", "My Work",
+    ...(["Admin", "Manager", "Senior Employee"].includes(currentUser.role) ? ["Workload"] : []),
     ...(currentUser.role === "Admin" ? ["User management"] : []),
     isWorker(currentUser.role) ? "My daily updates" : "Team tasks",
-    "Projects", "Archive", "Chats", "My profile",
+    "Projects", "Notifications", "Activity", "Archive", "Chats", "My profile",
 
   ];
   const selectedSection = navigationItems.some((item) => sectionTarget(item) === activeSection)
@@ -1063,7 +1077,7 @@ export default function Home() {
   return (
     <main className="workspace-theme min-h-screen bg-background text-slate-900">
         <div className="flex min-h-screen flex-col xl:flex-row">
-        <aside className="sticky top-0 hidden h-screen w-64 shrink-0 border-r border-slate-200/80 bg-white/90 p-4 backdrop-blur xl:block">
+        <aside className="sticky top-0 hidden h-screen w-64 shrink-0 overflow-y-auto border-r border-slate-200/80 bg-white/90 p-4 backdrop-blur xl:block">
           <div className="flex items-center gap-3">
             <img src="/mellivo-logo.png" alt="Mellivo logo" className="h-11 w-11 rounded-2xl border border-slate-200 bg-white object-contain p-1 shadow-sm" />
             <div>
@@ -1077,7 +1091,7 @@ export default function Home() {
           </div>
           <nav className="mt-6 space-y-1">
             {navigationItems.map((item) => (
-              <a key={item} href={`#${sectionTarget(item)}`} onClick={(event) => { event.preventDefault(); navigateTo(item); }} aria-current={(item === "Chats" ? chatOpen : selectedSection === sectionTarget(item)) ? "page" : undefined} className={`block w-full rounded-xl px-3 py-2.5 text-left text-sm font-semibold transition-colors ${(item === "Chats" ? chatOpen : selectedSection === sectionTarget(item)) ? "bg-indigo-600 text-white shadow-sm" : "text-slate-600 hover:bg-indigo-50 hover:text-indigo-700"}`}>{item}</a>
+              <a key={item} href={`#${sectionTarget(item)}`} onClick={(event) => { event.preventDefault(); navigateTo(item); }} aria-current={(item === "Chats" ? chatOpen : selectedSection === sectionTarget(item)) ? "page" : undefined} className={`block w-full rounded-xl px-3 py-2.5 text-left text-sm font-semibold transition-colors ${(item === "Chats" ? chatOpen : selectedSection === sectionTarget(item)) ? "bg-indigo-600 text-white shadow-sm" : "text-slate-600 hover:bg-indigo-50 hover:text-indigo-700"}`}>{item}{item === "Notifications" && notifications.length > 0 ? ` (${notifications.length})` : ""}</a>
             ))}
           </nav>
           <button
@@ -1111,7 +1125,7 @@ export default function Home() {
           <nav className="mt-4 flex flex-wrap gap-2">
             {navigationItems.map((item) => (
               <a key={item} href={`#${sectionTarget(item)}`} onClick={(event) => { event.preventDefault(); navigateTo(item); }} aria-current={(item === "Chats" ? chatOpen : selectedSection === sectionTarget(item)) ? "page" : undefined} className={`rounded-xl border px-3 py-2 text-xs font-semibold transition-colors ${(item === "Chats" ? chatOpen : selectedSection === sectionTarget(item)) ? "border-indigo-600 bg-indigo-600 text-white shadow-sm" : "border-slate-200 bg-slate-50 text-slate-700 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"}`}>
-                {item}
+                {item}{item === "Notifications" && notifications.length > 0 ? ` (${notifications.length})` : ""}
               </a>
             ))}
           </nav>
@@ -1123,10 +1137,18 @@ export default function Home() {
             {notice && (
               <button onClick={() => setNotice("")} className="mb-6 w-full rounded-lg bg-emerald-50 px-4 py-3 text-left text-sm text-emerald-800">{notice} <span className="float-right">×</span></button>
             )}
+            {(selectedSection === "my-work" || selectedSection === "workload") && <WorkOverview tasks={visibleTasks} userId={currentUser.id} users={users.filter(user => isWorker(user.role))} workload={selectedSection === "workload"} onOpen={id=>{setChatOpen(false);setSelectedTaskId(id);}} onChat={toggleMessages} unread={id=>notes.filter(note=>note.taskId===id&&isNewMessage(note)).length} />}
+            {selectedSection === "activity" && <ActivityHistory key={currentUser.id} />}
+            <div id="notifications" hidden={selectedSection !== "notifications"}>
+              <NotificationCenter notifications={notifications} projectName={getProjectName} onOpen={(notification) => {
+                if (notification.kind === "Messages") { toggleMessages(notification.taskId); }
+                else { setChatOpen(false); setSelectedTaskId(notification.taskId); }
+              }} />
+            </div>
             <div id="dashboard" hidden={selectedSection !== "dashboard"}>
             <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
               <div>
-                <p className="text-sm text-slate-500">Monday, August 9</p>
+                <p className="text-sm text-slate-500">{new Date(now).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}</p>
                 <h2 className="mt-1 flex flex-wrap items-center gap-3 text-3xl font-bold">
                   Good morning, {currentUser.name.split(" ")[0]}
                   <img
@@ -1203,6 +1225,7 @@ export default function Home() {
 
             <div id="tasks" hidden={selectedSection !== "tasks"} className="rounded-xl bg-slate-100 p-6">
               <div className="flex items-center justify-between"><div><h3 className="text-xl font-bold">{isWorker(currentUser.role) ? "My daily updates" : "Team task board"}</h3><p className="mt-1 text-sm text-slate-500">{currentUser.role === "Manager" ? "Create tasks, subtasks, messages, and assignments for employees." : isWorker(currentUser.role) ? "Update your daily progress and messages. Senior employees can delegate subtasks." : "View all work across the workspace."}</p></div>{currentUser.role === "Manager" && <button onClick={() => openTaskForm()} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white">+ New task</button>}</div>
+              <SavedFilters key={currentUser.id} userId={currentUser.id} filters={taskFilters} onSelect={setTaskFilters} />
               <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 <label className="text-xs font-semibold text-slate-600">Search tasks<input type="search" value={taskFilters.search} onChange={(event) => setTaskFilter("search", event.target.value)} placeholder="Title or description" className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal" /></label>
                 {([
@@ -1340,7 +1363,7 @@ export default function Home() {
               <div className="mt-6">
                 <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
                   <div>
-                    <h4 className="text-lg font-bold">{reportPeriod} progress log</h4>
+                    <h4 className="text-lg font-bold">{reportPeriod} progress log</h4><button disabled={!reportLogs.length} onClick={()=>downloadCsv("mellivo-progress.csv", [["Task","Employee","Date","Status","Progress","Update"],...reportLogs.map(log=>[visibleTasks.find(task=>task.id===log.taskId)?.title??log.taskId,getUserName(log.employeeId),log.createdAt,log.status,log.progress,log.description])])} className="mt-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">Export CSV</button>
                     <p className="mt-1 text-sm text-slate-500">Timestamped employee progress updates for {reportPeriodLabel}.</p>
                   </div>
                   <span className="text-xs font-medium text-slate-400">Newest updates first</span>
@@ -1389,7 +1412,7 @@ export default function Home() {
         </section>
       </div>
 
-      {selectedTaskId && visibleTasks.some((task) => task.id === selectedTaskId) && <TaskDetailsPanel onClose={() => setSelectedTaskId(null)}>{notice && <p role="status" className="mb-4 rounded-lg bg-indigo-50 p-3 text-sm text-indigo-700">{notice}</p>}{renderTask(visibleTasks.find((task) => task.id === selectedTaskId)!, 0, true)}</TaskDetailsPanel>}
+      {selectedTaskId && visibleTasks.some((task) => task.id === selectedTaskId) && <TaskDetailsPanel onClose={() => setSelectedTaskId(null)}>{notice && <p role="status" className="mb-4 rounded-lg bg-indigo-50 p-3 text-sm text-indigo-700">{notice}</p>}{renderTask(visibleTasks.find((task) => task.id === selectedTaskId)!, 0, true)}<TaskAttachments key={`files-${selectedTaskId}`} taskId={selectedTaskId} canUpload={Boolean(visibleTasks.find(task=>task.id===selectedTaskId && !task.archivedAt && (["Admin","Manager"].includes(currentUser.role)||task.assigneeId===currentUser.id||(currentUser.role==="Senior Employee"&&task.createdById===currentUser.id))))} /><ActivityHistory key={`activity-${selectedTaskId}`} taskId={selectedTaskId} /></TaskDetailsPanel>}
 
       {chatOpen && (
         <aside role="dialog" aria-label="Task chats" className="fixed bottom-3 right-3 z-30 flex h-[min(640px,85dvh)] w-[calc(100vw-24px)] flex-col overflow-hidden rounded-2xl border border-indigo-100 bg-white shadow-2xl sm:bottom-5 sm:right-5 sm:w-[400px]">
@@ -1408,6 +1431,7 @@ export default function Home() {
               </div>
             ))}<div ref={chatEndRef} />
           </div>
+          {chatTask && <div className="max-h-52 overflow-y-auto px-3"><TaskAttachments key={chatTask.id} taskId={chatTask.id} canUpload={canSendChat} /></div>}
           {chatError && <p role="alert" className="px-3 pt-2 text-xs text-red-600">{chatError}</p>}
           <form onSubmit={(event) => { event.preventDefault(); if (chatTask) void addNote(chatTask.id); }} className="flex items-end gap-2 border-t border-slate-100 p-3">
             <textarea aria-label="Message" disabled={!canSendChat || sendingMessage} maxLength={5000} rows={2} value={noteText} onChange={(event) => setNoteText(event.target.value)} placeholder={chatTask && !canSendChat ? "Read-only conversation" : "Write a message…"} className="min-w-0 flex-1 resize-none rounded-xl border border-slate-200 p-2 text-sm disabled:bg-slate-50" />
@@ -1417,7 +1441,7 @@ export default function Home() {
       )}
 
       {modal === "user" && currentUser.role === "Admin" && (
-        <div className="fixed inset-0 z-20 flex items-center justify-center bg-slate-900/40 p-4"><div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl"><div className="flex items-center justify-between"><div><h2 className="text-xl font-bold">Create new user</h2><p className="mt-1 text-sm text-slate-500">Assign a role and login credentials.</p></div><button onClick={() => setModal(null)} className="text-xl text-slate-400">×</button></div><form onSubmit={createUser} className="mt-6 space-y-4"><input value={newUserName} onChange={(event) => setNewUserName(event.target.value)} placeholder="Full name" className="w-full rounded-lg border px-4 py-3" /><input value={newUserEmail} onChange={(event) => setNewUserEmail(event.target.value)} type="email" placeholder="Email address" className="w-full rounded-lg border px-4 py-3" /><input value={newUserPassword} onChange={(event) => setNewUserPassword(event.target.value)} type="text" placeholder="Temporary password" className="w-full rounded-lg border px-4 py-3" /><select value={newUserRole} onChange={(event) => setNewUserRole(event.target.value as Role)} className="w-full rounded-lg border px-4 py-3"><option>Admin</option><option>Manager</option><option>Senior Employee</option><option>Employee</option></select><button className="w-full rounded-lg bg-indigo-600 px-4 py-3 font-semibold text-white">Create user</button></form></div></div>
+        <div className="fixed inset-0 z-20 flex items-center justify-center bg-slate-900/40 p-4"><div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl"><div className="flex items-center justify-between"><div><h2 className="text-xl font-bold">Invite new user</h2><p className="mt-1 text-sm text-slate-500">Send an email invitation so the user can choose a password.</p></div><button onClick={() => setModal(null)} className="text-xl text-slate-400">×</button></div><form onSubmit={createUser} className="mt-6 space-y-4"><input value={newUserName} onChange={(event) => setNewUserName(event.target.value)} placeholder="Full name" className="w-full rounded-lg border px-4 py-3" /><input value={newUserEmail} onChange={(event) => setNewUserEmail(event.target.value)} type="email" placeholder="Email address" className="w-full rounded-lg border px-4 py-3" /><select value={newUserRole} onChange={(event) => setNewUserRole(event.target.value as Role)} className="w-full rounded-lg border px-4 py-3"><option>Admin</option><option>Manager</option><option>Senior Employee</option><option>Employee</option></select><button disabled={invitingUser} className="w-full rounded-lg bg-indigo-600 px-4 py-3 font-semibold text-white disabled:opacity-50">{invitingUser ? "Sending…" : "Send invitation"}</button></form></div></div>
       )}
 
       {modal === "project" && currentUser.role === "Admin" && (
@@ -1425,7 +1449,7 @@ export default function Home() {
       )}
 
       {modal === "task" && ["Admin", "Manager", "Senior Employee"].includes(currentUser.role) && (
-        <div className="fixed inset-0 z-20 flex items-center justify-center overflow-y-auto bg-slate-900/40 p-4"><div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl"><div className="flex items-center justify-between"><div><h2 className="text-xl font-bold">{editingTaskId ? "Edit task" : "Create task or subtask"}</h2><p className="mt-1 text-sm text-slate-500">Assign work to a team member. Senior employees can assign subtasks to employees.</p></div><button onClick={() => setModal(null)} className="text-xl text-slate-400">×</button></div><form onSubmit={createTask} className="mt-6 space-y-4">{taskFormError && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{taskFormError}</p>}<input autoFocus value={newTaskTitle} onChange={(event) => setNewTaskTitle(event.target.value)} placeholder="Task title" className="w-full rounded-lg border px-4 py-3" /><textarea value={newTaskDescription} onChange={(event) => setNewTaskDescription(event.target.value)} placeholder="Task description" rows={3} className="w-full resize-none rounded-lg border px-4 py-3" /><div className="grid gap-4 md:grid-cols-2"><select aria-label="Task project" disabled={Boolean(editingTaskId) || currentUser.role === "Senior Employee"} value={newTaskProjectId || projects[0]?.id} onChange={(event) => { setNewTaskProjectId(event.target.value); setNewTaskParentId(""); }} className="rounded-lg border px-4 py-3">{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select><select aria-label="Assign to" value={newTaskAssigneeId || employees[0]?.id} onChange={(event) => setNewTaskAssigneeId(event.target.value)} className="rounded-lg border px-4 py-3">{employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.name}</option>)}</select><select aria-label="Parent task" disabled={Boolean(editingTaskId) || currentUser.role === "Senior Employee"} value={newTaskParentId} onChange={(event) => setNewTaskParentId(event.target.value)} className="rounded-lg border px-4 py-3"><option value="">Top-level task</option>{tasks.filter((task) => (currentUser.role === "Senior Employee" ? task.assigneeId === currentUser.id : !task.parentId) && task.projectId === (newTaskProjectId || projects[0]?.id)).map((task) => <option key={task.id} value={task.id}>Subtask of: {task.title}</option>)}</select><select value={newTaskPriority} onChange={(event) => setNewTaskPriority(event.target.value as Task["priority"])} className="rounded-lg border px-4 py-3"><option>High</option><option>Medium</option><option>Low</option></select></div><label className="block text-sm font-semibold text-slate-700">Start date<input required type="date" value={newTaskStart} onChange={(event) => { setNewTaskStart(event.target.value); if (event.target.value > newTaskDue) setNewTaskDue(event.target.value); }} className="mt-1 w-full rounded-lg border px-4 py-3 font-normal" /></label><label className="block text-sm font-semibold text-slate-700">Due date<input required min={newTaskStart} type="date" value={newTaskDue} onChange={(event) => setNewTaskDue(event.target.value)} className="mt-1 w-full rounded-lg border px-4 py-3 font-normal" /></label>{employees.length === 0 && <p className="text-sm text-amber-700">No eligible employees are available. Ask an admin to create an Employee account.</p>}<button disabled={employees.length === 0 || savingTask} className="w-full rounded-lg bg-indigo-600 px-4 py-3 font-semibold text-white disabled:opacity-40">{savingTask ? "Saving…" : editingTaskId ? "Save changes" : "Create and assign task"}</button></form></div></div>
+        <div className="fixed inset-0 z-20 flex items-center justify-center overflow-y-auto bg-slate-900/40 p-4"><div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl"><div className="flex items-center justify-between"><div><h2 className="text-xl font-bold">{editingTaskId ? "Edit task" : "Create task or subtask"}</h2><p className="mt-1 text-sm text-slate-500">Assign work to a team member. Senior employees can assign subtasks to employees.</p></div><button onClick={() => setModal(null)} className="text-xl text-slate-400">×</button></div><form onSubmit={createTask} className="mt-6 space-y-4">{taskFormError && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{taskFormError}</p>}<input autoFocus value={newTaskTitle} onChange={(event) => setNewTaskTitle(event.target.value)} placeholder="Task title" className="w-full rounded-lg border px-4 py-3" /><textarea value={newTaskDescription} onChange={(event) => setNewTaskDescription(event.target.value)} placeholder="Task description" rows={3} className="w-full resize-none rounded-lg border px-4 py-3" /><div className="grid gap-4 md:grid-cols-2"><select aria-label="Task project" disabled={Boolean(editingTaskId) || currentUser.role === "Senior Employee"} value={newTaskProjectId || projects[0]?.id} onChange={(event) => { setNewTaskProjectId(event.target.value); setNewTaskParentId(""); }} className="rounded-lg border px-4 py-3">{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select><select aria-label="Assign to" value={newTaskAssigneeId || employees[0]?.id} onChange={(event) => setNewTaskAssigneeId(event.target.value)} className="rounded-lg border px-4 py-3">{employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.name} ({visibleTasks.filter(task => task.assigneeId === employee.id && task.status !== "Completed").length} active)</option>)}</select><select aria-label="Parent task" disabled={Boolean(editingTaskId) || currentUser.role === "Senior Employee"} value={newTaskParentId} onChange={(event) => setNewTaskParentId(event.target.value)} className="rounded-lg border px-4 py-3"><option value="">Top-level task</option>{tasks.filter((task) => (currentUser.role === "Senior Employee" ? task.assigneeId === currentUser.id : !task.parentId) && task.projectId === (newTaskProjectId || projects[0]?.id)).map((task) => <option key={task.id} value={task.id}>Subtask of: {task.title}</option>)}</select><select value={newTaskPriority} onChange={(event) => setNewTaskPriority(event.target.value as Task["priority"])} className="rounded-lg border px-4 py-3"><option>High</option><option>Medium</option><option>Low</option></select></div><label className="block text-sm font-semibold text-slate-700">Start date<input required type="date" value={newTaskStart} onChange={(event) => { setNewTaskStart(event.target.value); if (event.target.value > newTaskDue) setNewTaskDue(event.target.value); }} className="mt-1 w-full rounded-lg border px-4 py-3 font-normal" /></label><label className="block text-sm font-semibold text-slate-700">Due date<input required min={newTaskStart} type="date" value={newTaskDue} onChange={(event) => setNewTaskDue(event.target.value)} className="mt-1 w-full rounded-lg border px-4 py-3 font-normal" /></label>{employees.length === 0 && <p className="text-sm text-amber-700">No eligible employees are available. Ask an admin to create an Employee account.</p>}<button disabled={employees.length === 0 || savingTask} className="w-full rounded-lg bg-indigo-600 px-4 py-3 font-semibold text-white disabled:opacity-40">{savingTask ? "Saving…" : editingTaskId ? "Save changes" : "Create and assign task"}</button></form></div></div>
       )}
     </main>
   );

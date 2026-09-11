@@ -9,6 +9,7 @@ const roleSchema = z.enum(["Admin", "Manager", "Senior Employee", "Employee"]);
 const statusSchema = z.enum(["Not started", "In progress", "Completed"]);
 const prioritySchema = z.enum(["High", "Medium", "Low"]);
 const actionSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("invite_user"), name: z.string().trim().min(2).max(120), email: z.email().max(254), role: roleSchema }),
   z.object({ action: z.literal("create_user"), name: z.string().trim().min(2).max(120), email: z.string().trim().email().max(254), password: z.string().min(8).max(128), role: roleSchema }),
   z.object({ action: z.literal("update_user"), userId: z.string().uuid(), role: roleSchema.optional(), active: z.boolean().optional() }),
   z.object({ action: z.literal("update_profile"), name: z.string().trim().min(2).max(120) }),
@@ -33,10 +34,6 @@ function taskStatusFromRow(value: unknown): TaskStatus {
 
 function isCompletedStatus(value: unknown) {
   return value === "Completed" || value === "Complete";
-}
-
-function isLegacyStatusError(error: { message?: string } | null) {
-  return Boolean(error?.message && /task_status|invalid input value for enum/i.test(error.message));
 }
 
 function userFromProfile(profile: ProfileRow) {
@@ -67,9 +64,21 @@ function fail(message: string, status = 400) {
   return NextResponse.json({ error: message }, { status });
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const { client, user, profile } = await getContext();
+    const params = new URL(request.url).searchParams;
+    if (params.get("view") === "activity") {
+      const before = params.get("before");
+      if (before && !/^\d+$/.test(before)) return fail("Invalid activity cursor.");
+      let query = client.from("activity_events").select("*").order("id", { ascending: false }).limit(51);
+      if (params.get("taskId")) query = query.eq("entity_type", "task").eq("entity_id", params.get("taskId")!);
+      if (before) query = query.lt("id", before);
+      const { data, error } = await query;
+      if (error) return fail(error.code === "42P01" || error.code === "PGRST205" ? "Activity history needs its database migration applied." : "Unable to load activity history.", 503);
+      const events = (data ?? []).slice(0, 50);
+      return NextResponse.json({ events, nextCursor: (data?.length ?? 0) > 50 ? String(events.at(-1)!.id) : null }, { headers: { "Cache-Control": "no-store" } });
+    }
     const [profiles, projects, tasks, notes, progressLogs] = await Promise.all([
       client.from("profiles").select("id, name, role, active").order("name"),
       client.from("projects").select("*").order("created_at", { ascending: false }),
@@ -102,6 +111,18 @@ export async function POST(request: Request) {
     const body = actionSchema.safeParse(await request.json());
     if (!body.success) return fail("The submitted data is invalid.");
     const input = body.data;
+
+    if (input.action === "invite_user") {
+      if (context.profile.role !== "Admin") return fail("Only admins can invite users.", 403);
+      if (!process.env.SUPABASE_SERVICE_ROLE_KEY) return fail("Configure the server service key to send invitations.", 503);
+      const admin = createSupabaseAdminClient();
+      const origin = process.env.APP_URL || "https://mellivo-task-manager.vercel.app";
+      const { data, error } = await admin.auth.admin.inviteUserByEmail(input.email.toLowerCase(), { data: { name: input.name }, redirectTo: `${origin}/auth/set-password` });
+      if (error || !data.user) return fail(error?.message || "Unable to send invitation.");
+      const { error: profileError } = await context.client.from("profiles").update({ name: input.name, role: input.role, active: true }).eq("id", data.user.id);
+      if (profileError) return fail("Invitation sent, but the requested role could not be applied. Update the user role in User management.", 500);
+      return NextResponse.json({ ok: true });
+    }
 
     if (input.action === "create_user") {
       if (context.profile.role !== "Admin") return fail("Only admins can create users.", 403);
