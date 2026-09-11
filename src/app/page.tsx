@@ -11,6 +11,7 @@ import WorkOverview from "@/components/work-overview";
 import { downloadCsv } from "@/lib/report-export";
 import TaskAttachments from "@/components/task-attachments";
 import ThemeToggle from "@/components/theme-toggle";
+import DashboardCharts from "@/components/dashboard-charts";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase/browser";
 
 type Role = "Admin" | "Manager" | "Senior Employee" | "Employee";
@@ -419,6 +420,13 @@ export default function Home() {
   const navigateTo = (item: string) => {
     if (item === "Chats") { setChatOpen(true); return; }
     setActiveSection(sectionTarget(item));
+    window.scrollTo({ top: 0, behavior: "instant" });
+  };
+
+  const openTaskFromOverview = (taskId: string) => {
+    setChatOpen(false);
+    setActiveSection("tasks");
+    setSelectedTaskId(taskId);
     window.scrollTo({ top: 0, behavior: "instant" });
   };
 
@@ -1063,13 +1071,25 @@ export default function Home() {
   const chatNotes = notes.filter((note) => note.taskId === chatTask?.id).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   const canSendChat = Boolean(chatTask && (currentUser.role === "Manager" || (isWorker(currentUser.role) && chatTask.assigneeId === currentUser.id) || (currentUser.role === "Senior Employee" && chatTask.createdById === currentUser.id)));
   const notifications = buildNotifications(visibleTasks, notes, currentUser, new Date(now));
+  const workloadUsers = users.filter(user => user.active && user.id !== currentUser.id && (
+    currentUser.role === "Admin"
+      ? user.role !== "Admin"
+      : currentUser.role === "Manager"
+        ? user.role === "Senior Employee" || user.role === "Employee"
+        : currentUser.role === "Senior Employee" && user.role === "Employee"
+  ));
   const navigationItems = [
-    "Dashboard", "My Work",
-    ...(["Admin", "Manager", "Senior Employee"].includes(currentUser.role) ? ["Workload"] : []),
-    ...(currentUser.role === "Admin" ? ["User management"] : []),
+    "Dashboard",
+    "My Work",
     isWorker(currentUser.role) ? "My daily updates" : "Team tasks",
-    "Projects", "Notifications", "Activity", "Archive", "Chats", "My profile",
-
+    "Projects",
+    "Chats",
+    "Notifications",
+    ...(["Admin", "Manager", "Senior Employee"].includes(currentUser.role) ? ["Workload"] : []),
+    "Activity",
+    "Archive",
+    ...(currentUser.role === "Admin" ? ["User management"] : []),
+    "My profile",
   ];
   const selectedSection = navigationItems.some((item) => sectionTarget(item) === activeSection)
     ? activeSection : "dashboard";
@@ -1137,7 +1157,7 @@ export default function Home() {
             {notice && (
               <button onClick={() => setNotice("")} className="mb-6 w-full rounded-lg bg-emerald-50 px-4 py-3 text-left text-sm text-emerald-800">{notice} <span className="float-right">×</span></button>
             )}
-            {(selectedSection === "my-work" || selectedSection === "workload") && <WorkOverview tasks={visibleTasks} userId={currentUser.id} users={users.filter(user => isWorker(user.role))} workload={selectedSection === "workload"} onOpen={id=>{setChatOpen(false);setSelectedTaskId(id);}} onChat={toggleMessages} unread={id=>notes.filter(note=>note.taskId===id&&isNewMessage(note)).length} />}
+            {(selectedSection === "my-work" || selectedSection === "workload") && <WorkOverview tasks={visibleTasks} userId={currentUser.id} users={workloadUsers} workload={selectedSection === "workload"} onOpen={openTaskFromOverview} onChat={toggleMessages} unread={id=>notes.filter(note=>note.taskId===id&&isNewMessage(note)).length} />}
             {selectedSection === "activity" && <ActivityHistory key={currentUser.id} />}
             <div id="notifications" hidden={selectedSection !== "notifications"}>
               <NotificationCenter notifications={notifications} projectName={getProjectName} onOpen={(notification) => {
@@ -1179,6 +1199,8 @@ export default function Home() {
               <div className="rounded-xl bg-white p-5 shadow-sm"><p className="text-sm text-slate-500">Completed</p><p className="mt-2 text-3xl font-bold text-green-600">{completedCount}</p></div>
               <div className="rounded-xl bg-white p-5 shadow-sm"><p className="text-sm text-slate-500">Average progress</p><p className="mt-2 text-3xl font-bold text-indigo-600">{averageProgress}%</p></div>
             </div>
+
+            <DashboardCharts tasks={visibleTasks} projects={projects} progressLogs={progressLogs} />
 
             </div>
 
@@ -1454,3 +1476,4 @@ export default function Home() {
     </main>
   );
 }
+
